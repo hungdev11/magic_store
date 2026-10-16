@@ -1483,8 +1483,8 @@ func (s *Server) handleGetBatches(w http.ResponseWriter, r *http.Request) {
 	if q != "" {
 		like := "%" + q + "%"
 		query = query.Where(
-			"inventory_batches.batch_code LIKE ? OR inventory_batches.notes LIKE ? OR inventory_batches.variant_id IN (SELECT pv.id FROM product_variants pv LEFT JOIN products p ON p.id = pv.product_id WHERE pv.sku LIKE ? OR p.name LIKE ?)",
-			like, like, like, like,
+			"inventory_batches.batch_code LIKE ? OR inventory_batches.notes LIKE ? OR inventory_batches.variant_id IN (SELECT pv.id FROM product_variants pv LEFT JOIN products p ON p.id = pv.product_id WHERE pv.sku LIKE ? OR pv.variant_name LIKE ? OR p.name LIKE ? OR p.code LIKE ?)",
+			like, like, like, like, like, like,
 		)
 	}
 
@@ -1565,31 +1565,34 @@ func (s *Server) handleUpdateBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	updates := map[string]interface{}{}
 	if rawNotes, ok := raw["notes"]; ok {
 		var notes string
 		if err := json.Unmarshal(rawNotes, &notes); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid notes")
 			return
 		}
-		batch.Notes = notes
+		updates["notes"] = notes
 	}
 
 	if rawExpiry, ok := raw["expiry_date"]; ok {
 		if string(rawExpiry) == "null" {
-			batch.ExpiryDate = nil
+			updates["expiry_date"] = nil
 		} else {
 			var expiry time.Time
 			if err := json.Unmarshal(rawExpiry, &expiry); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid expiry_date")
 				return
 			}
-			batch.ExpiryDate = &expiry
+			updates["expiry_date"] = &expiry
 		}
 	}
 
-	if err := s.db.Save(&batch).Error; err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	if len(updates) > 0 {
+		if err := s.db.Model(&batch).Select("Notes", "ExpiryDate").Updates(updates).Error; err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	if err := s.db.Preload("Variant.Product").Preload("Supplier").First(&batch, "id = ?", batch.ID).Error; err != nil {

@@ -70,6 +70,31 @@ func TestBatchesAPI_List_Update_And_Trace(t *testing.T) {
 		t.Fatalf("expected preloaded Variant.Product, got: %+v", batches[0].Variant)
 	}
 
+	// 1a. Test search by SKU and product code
+	reqSearchSku := httptest.NewRequest("GET", "/api/batches?q=SKU_B1", nil)
+	wSearchSku := httptest.NewRecorder()
+	server.ServeHTTP(wSearchSku, reqSearchSku)
+	if wSearchSku.Code != http.StatusOK {
+		t.Fatalf("expected 200 searching by SKU, got %d", wSearchSku.Code)
+	}
+	var skuBatches []model.InventoryBatch
+	_ = json.NewDecoder(wSearchSku.Body).Decode(&skuBatches)
+	if len(skuBatches) != 1 {
+		t.Fatalf("expected 1 batch for SKU search, got %d", len(skuBatches))
+	}
+
+	reqSearchCode := httptest.NewRequest("GET", "/api/batches?q=PROD_B1", nil)
+	wSearchCode := httptest.NewRecorder()
+	server.ServeHTTP(wSearchCode, reqSearchCode)
+	if wSearchCode.Code != http.StatusOK {
+		t.Fatalf("expected 200 searching by product code, got %d", wSearchCode.Code)
+	}
+	var codeBatches []model.InventoryBatch
+	_ = json.NewDecoder(wSearchCode.Body).Decode(&codeBatches)
+	if len(codeBatches) != 1 {
+		t.Fatalf("expected 1 batch for product code search, got %d", len(codeBatches))
+	}
+
 	// 1b. Test GET /api/batches with status filters
 	reqActive := httptest.NewRequest("GET", "/api/batches?status=ACTIVE", nil)
 	wActive := httptest.NewRecorder()
