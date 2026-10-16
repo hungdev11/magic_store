@@ -12,4 +12,6 @@ var (
 	ErrRecipeNotFound              = errors.New("bom recipe not found")
 	ErrInvalidYieldQty             = errors.New("yield quantity must be positive")
 	ErrInvalidInputQty             = errors.New("input quantity must be positive")
+	ErrBatchMismatch               = errors.New("batch does not belong to variant")
+	ErrProductNotFound             = errors.New("product not found for variant")
 )

@@ -66,6 +66,10 @@ func (s *UOMService) ToBaseQty(ctx context.Context, tx *gorm.DB, params ToBaseQt
 		return decimal.Zero, err
 	}
 
+	if variant.Product == nil {
+		return decimal.Zero, ErrProductNotFound
+	}
+
 	if params.InputUOM == variant.Product.BaseUom {
 		if params.ActualWeight != nil {
 			return *params.ActualWeight, nil
@@ -102,6 +106,10 @@ func (s *UOMService) FromBaseQty(ctx context.Context, tx *gorm.DB, params FromBa
 		return decimal.Zero, err
 	}
 
+	if variant.Product == nil {
+		return decimal.Zero, ErrProductNotFound
+	}
+
 	if params.TargetUOM == variant.Product.BaseUom {
 		return params.BaseQty, nil
 	}
@@ -130,6 +138,10 @@ func (s *UOMService) CalculateLinePrice(ctx context.Context, tx *gorm.DB, params
 			return nil, ErrVariantNotFound
 		}
 		return nil, err
+	}
+
+	if variant.Product == nil {
+		return nil, ErrProductNotFound
 	}
 
 	isBaseUom := params.SoldUOM == variant.Product.BaseUom

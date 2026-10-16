@@ -284,13 +284,17 @@ func (s *BOMProductionService) ExecuteDisassembly(ctx context.Context, tx *gorm.
 	hundred := decimal.NewFromInt(100)
 
 	for _, yield := range params.YieldOutputs {
-		totalYieldQty = totalYieldQty.Add(yield.ActualQty)
+		if yield.ActualQty.LessThanOrEqual(decimal.Zero) {
+			return nil, ErrInvalidYieldQty
+		}
 
 		item, ok := itemMap[yield.ComponentVariantID]
-		allocPercent := decimal.Zero
-		if ok {
-			allocPercent = item.CostAllocationPercent
+		if !ok {
+			return nil, fmt.Errorf("unknown yield component variant: %s", yield.ComponentVariantID)
 		}
+
+		totalYieldQty = totalYieldQty.Add(yield.ActualQty)
+		allocPercent := item.CostAllocationPercent
 
 		allocatedCost := totalDisasmCost.Mul(allocPercent).Div(hundred)
 		unitCost := decimal.Zero
@@ -401,11 +405,18 @@ func (s *BOMProductionService) ExecuteBackflushDeduction(ctx context.Context, tx
 	resultMovements := make([]*model.InventoryMovement, 0)
 
 	for _, item := range params.Items {
+		if item.Qty.LessThanOrEqual(decimal.Zero) {
+			return nil, errors.New("item quantity must be positive")
+		}
+
 		// 1. Process BOM Recipe for main item
 		var recipe model.BomRecipe
 		err := db.Preload("Items.ComponentVariant.Product").
 			Where("target_variant_id = ? AND recipe_type = ?", item.VariantID, model.RecipeTypeAssembly).
 			First(&recipe).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
 
 		if err == nil {
 			ratio := item.Qty
@@ -445,76 +456,89 @@ func (s *BOMProductionService) ExecuteBackflushDeduction(ctx context.Context, tx
 		// 2. Process Modifiers
 		if item.ModifiersJSON != "" {
 			var modEntries []rawModifierEntry
-			if err := json.Unmarshal([]byte(item.ModifiersJSON), &modEntries); err == nil {
-				for _, mod := range modEntries {
-					var targetVariant model.ProductVariant
-					var variantFound bool
+			if err := json.Unmarshal([]byte(item.ModifiersJSON), &modEntries); err != nil {
+				return nil, fmt.Errorf("failed to parse modifiers json: %w", err)
+			}
+			for _, mod := range modEntries {
+				var targetVariant model.ProductVariant
+				var variantFound bool
 
-					if mod.LinkedVariantID != "" {
-						if err := db.Preload("Product").First(&targetVariant, "id = ?", mod.LinkedVariantID).Error; err == nil {
+				if mod.LinkedVariantID != "" {
+					if err := db.Preload("Product").First(&targetVariant, "id = ?", mod.LinkedVariantID).Error; err != nil {
+						if !errors.Is(err, gorm.ErrRecordNotFound) {
+							return nil, err
+						}
+					} else {
+						variantFound = true
+					}
+				} else if mod.LinkedSKU != "" {
+					if err := db.Preload("Product").First(&targetVariant, "sku = ?", mod.LinkedSKU).Error; err != nil {
+						if !errors.Is(err, gorm.ErrRecordNotFound) {
+							return nil, err
+						}
+					} else {
+						variantFound = true
+					}
+				} else if mod.ModifierItemID != "" || mod.ID != "" {
+					lookupID := mod.ModifierItemID
+					if lookupID == "" {
+						lookupID = mod.ID
+					}
+					var modItem model.ModifierItem
+					if err := db.Preload("LinkedVariant.Product").First(&modItem, "id = ?", lookupID).Error; err != nil {
+						if !errors.Is(err, gorm.ErrRecordNotFound) {
+							return nil, err
+						}
+					} else {
+						if modItem.LinkedVariant != nil {
+							targetVariant = *modItem.LinkedVariant
 							variantFound = true
-						}
-					} else if mod.LinkedSKU != "" {
-						if err := db.Preload("Product").First(&targetVariant, "sku = ?", mod.LinkedSKU).Error; err == nil {
-							variantFound = true
-						}
-					} else if mod.ModifierItemID != "" || mod.ID != "" {
-						lookupID := mod.ModifierItemID
-						if lookupID == "" {
-							lookupID = mod.ID
-						}
-						var modItem model.ModifierItem
-						if err := db.Preload("LinkedVariant.Product").First(&modItem, "id = ?", lookupID).Error; err == nil {
-							if modItem.LinkedVariant != nil {
-								targetVariant = *modItem.LinkedVariant
-								variantFound = true
-								if mod.DeductQty.IsZero() && modItem.DeductQty != nil {
-									mod.DeductQty = *modItem.DeductQty
-								}
+							if mod.DeductQty.IsZero() && modItem.DeductQty != nil {
+								mod.DeductQty = *modItem.DeductQty
 							}
 						}
 					}
-
-					if !variantFound {
-						continue
-					}
-
-					deductQtyPerUnit := mod.DeductQty
-					if deductQtyPerUnit.IsZero() {
-						deductQtyPerUnit = decimal.NewFromInt(1)
-					}
-
-					modCount := mod.Qty
-					if modCount.IsZero() {
-						modCount = decimal.NewFromInt(1)
-					}
-
-					totalModifierDeduct := deductQtyPerUnit.Mul(item.Qty).Mul(modCount)
-					if totalModifierDeduct.IsZero() {
-						continue
-					}
-
-					uom := ""
-					if targetVariant.Product != nil {
-						uom = targetVariant.Product.BaseUom
-					}
-
-					note := fmt.Sprintf("Backflush modifier deduction: %s", mod.Name)
-					mov, err := s.ledgerService.RecordMovement(ctx, db, RecordMovementParams{
-						VariantID:      targetVariant.ID,
-						MovementType:   model.MovementTypeProductionConsume,
-						QtyInBaseUom:   totalModifierDeduct.Neg(),
-						InputUOM:       uom,
-						InputQty:       totalModifierDeduct.Neg(),
-						UnitCostAtTime: targetVariant.CostPrice,
-						ReferenceID:    item.ReferenceID,
-						ReasonNote:     &note,
-					})
-					if err != nil {
-						return nil, err
-					}
-					resultMovements = append(resultMovements, mov)
 				}
+
+				if !variantFound {
+					continue
+				}
+
+				deductQtyPerUnit := mod.DeductQty
+				if deductQtyPerUnit.IsZero() {
+					deductQtyPerUnit = decimal.NewFromInt(1)
+				}
+
+				modCount := mod.Qty
+				if modCount.IsZero() {
+					modCount = decimal.NewFromInt(1)
+				}
+
+				totalModifierDeduct := deductQtyPerUnit.Mul(item.Qty).Mul(modCount)
+				if totalModifierDeduct.IsZero() {
+					continue
+				}
+
+				uom := ""
+				if targetVariant.Product != nil {
+					uom = targetVariant.Product.BaseUom
+				}
+
+				note := fmt.Sprintf("Backflush modifier deduction: %s", mod.Name)
+				mov, err := s.ledgerService.RecordMovement(ctx, db, RecordMovementParams{
+					VariantID:      targetVariant.ID,
+					MovementType:   model.MovementTypeProductionConsume,
+					QtyInBaseUom:   totalModifierDeduct.Neg(),
+					InputUOM:       uom,
+					InputQty:       totalModifierDeduct.Neg(),
+					UnitCostAtTime: targetVariant.CostPrice,
+					ReferenceID:    item.ReferenceID,
+					ReasonNote:     &note,
+				})
+				if err != nil {
+					return nil, err
+				}
+				resultMovements = append(resultMovements, mov)
 			}
 		}
 	}

@@ -61,7 +61,7 @@ func (s *InventoryLedgerService) RecordMovement(ctx context.Context, tx *gorm.DB
 	db := tx.WithContext(ctx)
 
 	var variant model.ProductVariant
-	if err := db.First(&variant, "id = ?", params.VariantID).Error; err != nil {
+	if err := db.Preload("Product").First(&variant, "id = ?", params.VariantID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrVariantNotFound
 		}
@@ -77,6 +77,10 @@ func (s *InventoryLedgerService) RecordMovement(ctx context.Context, tx *gorm.DB
 			return nil, err
 		}
 
+		if batch.VariantID != params.VariantID {
+			return nil, ErrBatchMismatch
+		}
+
 		if err := db.Model(&model.InventoryBatch{}).
 			Where("id = ?", *params.BatchID).
 			Update("remaining_qty", gorm.Expr("remaining_qty + ?", params.QtyInBaseUom)).Error; err != nil {
@@ -90,12 +94,17 @@ func (s *InventoryLedgerService) RecordMovement(ctx context.Context, tx *gorm.DB
 		return nil, err
 	}
 
+	inputUOM := params.InputUOM
+	if inputUOM == "" && variant.Product != nil {
+		inputUOM = variant.Product.BaseUom
+	}
+
 	movement := &model.InventoryMovement{
 		VariantID:      params.VariantID,
 		BatchID:        params.BatchID,
 		MovementType:   params.MovementType,
 		QtyInBaseUom:   params.QtyInBaseUom,
-		InputUom:       params.InputUOM,
+		InputUom:       inputUOM,
 		InputQty:       params.InputQty,
 		UnitCostAtTime: params.UnitCostAtTime,
 		ReferenceID:    params.ReferenceID,
@@ -170,12 +179,19 @@ func (s *InventoryLedgerService) StateTransform(ctx context.Context, tx *gorm.DB
 
 	db := tx.WithContext(ctx)
 
+	if params.QtyInBaseUom.LessThanOrEqual(decimal.Zero) {
+		return nil, nil, errors.New("transform quantity must be positive")
+	}
+
 	var fromVariant model.ProductVariant
 	if err := db.Preload("Product").First(&fromVariant, "id = ?", params.FromVariantID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, ErrVariantNotFound
 		}
 		return nil, nil, err
+	}
+	if fromVariant.Product == nil {
+		return nil, nil, ErrProductNotFound
 	}
 
 	var toVariant model.ProductVariant
@@ -184,6 +200,9 @@ func (s *InventoryLedgerService) StateTransform(ctx context.Context, tx *gorm.DB
 			return nil, nil, ErrVariantNotFound
 		}
 		return nil, nil, err
+	}
+	if toVariant.Product == nil {
+		return nil, nil, ErrProductNotFound
 	}
 
 	unitCost := fromVariant.CostPrice
