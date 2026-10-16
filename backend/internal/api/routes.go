@@ -48,12 +48,16 @@ func NewServer(
 	// Catalog & Products
 	mux.HandleFunc("GET /api/categories", s.handleGetCategories)
 	mux.HandleFunc("POST /api/categories", s.handleCreateCategory)
+	mux.HandleFunc("PUT /api/categories/{id}", s.handleUpdateCategory)
+	mux.HandleFunc("DELETE /api/categories/{id}", s.handleDeleteCategory)
 	mux.HandleFunc("GET /api/products", s.handleGetProducts)
 	mux.HandleFunc("POST /api/products", s.handleCreateProduct)
 
 	// Partners
 	mux.HandleFunc("GET /api/partners", s.handleGetPartners)
 	mux.HandleFunc("POST /api/partners", s.handleCreatePartner)
+	mux.HandleFunc("PUT /api/partners/{id}", s.handleUpdatePartner)
+	mux.HandleFunc("DELETE /api/partners/{id}", s.handleDeletePartner)
 
 	// Inventory
 	mux.HandleFunc("POST /api/inventory/purchase", s.handlePurchaseReceiving)

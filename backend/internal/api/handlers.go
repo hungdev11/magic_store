@@ -319,6 +319,12 @@ func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	cat.Name = strings.TrimSpace(cat.Name)
+	cat.Code = strings.TrimSpace(cat.Code)
+	if cat.Name == "" || cat.Code == "" {
+		writeError(w, http.StatusBadRequest, "name and code are required")
+		return
+	}
 	if cat.ID == "" {
 		cat.ID = uuid.New().String()
 	}
@@ -327,6 +333,107 @@ func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, cat)
+}
+
+type updateCategoryInput struct {
+	Name     string  `json:"name"`
+	Code     string  `json:"code"`
+	IsActive *bool   `json:"is_active"`
+	ParentID *string `json:"parent_id"`
+}
+
+func (s *Server) handleUpdateCategory(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "category id is required")
+		return
+	}
+
+	var cat model.Category
+	if err := s.db.First(&cat, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(w, http.StatusNotFound, "category not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	var input updateCategoryInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if trimmed := strings.TrimSpace(input.Code); trimmed != "" {
+		cat.Code = trimmed
+	}
+	if trimmed := strings.TrimSpace(input.Name); trimmed != "" {
+		cat.Name = trimmed
+	}
+	if input.IsActive != nil {
+		cat.IsActive = *input.IsActive
+	}
+	if input.ParentID != nil {
+		trimmed := strings.TrimSpace(*input.ParentID)
+		if trimmed == "" {
+			cat.ParentID = nil
+		} else {
+			if trimmed == id {
+				writeError(w, http.StatusBadRequest, "category cannot be its own parent")
+				return
+			}
+			cat.ParentID = &trimmed
+		}
+	}
+
+	if err := s.db.Save(&cat).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, cat)
+}
+
+func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "category id is required")
+		return
+	}
+
+	var cat model.Category
+	if err := s.db.First(&cat, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(w, http.StatusNotFound, "category not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	// ponytail: manual referential check on code; upgrade to schema FK constraints when DB migration strategy stabilizes.
+	var prodCount int64
+	if err := s.db.Model(&model.Product{}).Where("category_id = ?", id).Count(&prodCount).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var childCount int64
+	if err := s.db.Model(&model.Category{}).Where("parent_id = ?", id).Count(&childCount).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if prodCount > 0 || childCount > 0 {
+		writeError(w, http.StatusConflict, "Danh mục đang chứa sản phẩm hoặc danh mục con, không thể xóa.")
+		return
+	}
+
+	if err := s.db.Delete(&cat).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
 
 // ----------------------------------------------------------------------------
@@ -529,7 +636,7 @@ func cartesianProduct(keys []string, attrs map[string][]string) []map[string]str
 // ----------------------------------------------------------------------------
 
 func (s *Server) handleGetPartners(w http.ResponseWriter, r *http.Request) {
-	partnerType := r.URL.Query().Get("type")
+	partnerType := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("type")))
 	var partners []model.Partner
 	query := s.db
 	if partnerType != "" {
@@ -555,17 +662,28 @@ func (s *Server) handleCreatePartner(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if input.Name == "" {
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	if input.PartnerType == "" {
 		input.PartnerType = model.PartnerTypeSupplier
 	}
+	var phone *string
+	if input.Phone != nil {
+		trimmed := strings.TrimSpace(*input.Phone)
+		phone = &trimmed
+	}
+	var address *string
+	if input.Address != nil {
+		trimmed := strings.TrimSpace(*input.Address)
+		address = &trimmed
+	}
 	p := model.Partner{
-		Name:        input.Name,
-		Phone:       input.Phone,
-		Address:     input.Address,
+		Name:        name,
+		Phone:       phone,
+		Address:     address,
 		PartnerType: input.PartnerType,
 	}
 	if err := s.db.Create(&p).Error; err != nil {
@@ -573,6 +691,118 @@ func (s *Server) handleCreatePartner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
+}
+
+type updatePartnerInput struct {
+	Name        string            `json:"name"`
+	Phone       *string           `json:"phone,omitempty"`
+	Address     *string           `json:"address,omitempty"`
+	PartnerType model.PartnerType `json:"partner_type,omitempty"`
+	PriceTier   string            `json:"price_tier,omitempty"`
+	CreditLimit *decimal.Decimal  `json:"credit_limit,omitempty"`
+	IsActive    *bool             `json:"is_active,omitempty"`
+}
+
+func (s *Server) handleUpdatePartner(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "partner id is required")
+		return
+	}
+
+	var p model.Partner
+	if err := s.db.First(&p, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(w, http.StatusNotFound, "partner not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	var input updatePartnerInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if trimmed := strings.TrimSpace(input.Name); trimmed != "" {
+		p.Name = trimmed
+	}
+	if input.Phone != nil {
+		trimmed := strings.TrimSpace(*input.Phone)
+		p.Phone = &trimmed
+	}
+	if input.Address != nil {
+		trimmed := strings.TrimSpace(*input.Address)
+		p.Address = &trimmed
+	}
+	if input.PartnerType != "" {
+		p.PartnerType = input.PartnerType
+	}
+	if trimmed := strings.TrimSpace(input.PriceTier); trimmed != "" {
+		p.PriceTier = trimmed
+	}
+	if input.CreditLimit != nil {
+		p.CreditLimit = *input.CreditLimit
+	}
+	if input.IsActive != nil {
+		p.IsActive = *input.IsActive
+	}
+
+	if err := s.db.Save(&p).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) handleDeletePartner(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "partner id is required")
+		return
+	}
+
+	var p model.Partner
+	if err := s.db.First(&p, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(w, http.StatusNotFound, "partner not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	// ponytail: manual referential check on code; upgrade to schema FK constraints when DB migration strategy stabilizes.
+	var batchCount int64
+	if err := s.db.Model(&model.InventoryBatch{}).Where("supplier_id = ?", id).Count(&batchCount).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var orderCount int64
+	if err := s.db.Model(&model.SalesOrder{}).Where("customer_id = ?", id).Count(&orderCount).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var debtCount int64
+	if err := s.db.Model(&model.DebtLedger{}).Where("partner_id = ?", id).Count(&debtCount).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if batchCount > 0 || orderCount > 0 || debtCount > 0 {
+		writeError(w, http.StatusConflict, "Đối tác đã phát sinh giao dịch, không thể xóa.")
+		return
+	}
+
+	if err := s.db.Delete(&p).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
 
 // ----------------------------------------------------------------------------
