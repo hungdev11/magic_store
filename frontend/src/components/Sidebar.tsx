@@ -15,6 +15,7 @@ import {
   Sparkles,
   Layers,
   WalletCards,
+  ShoppingCart,
 } from "lucide-react";
 
 interface NavItem {
@@ -29,7 +30,17 @@ export function Sidebar() {
   const pathname = usePathname();
   const { isModuleEnabled, storeSetting } = useStoreProfile();
 
+  if (pathname === "/pos" || pathname?.startsWith("/pos/")) {
+    return null;
+  }
+
   const navItems: NavItem[] = [
+    {
+      name: "Bán hàng POS",
+      href: "/pos",
+      icon: ShoppingCart,
+      badge: "POS",
+    },
     {
       name: "Tổng quan",
       href: "/",
