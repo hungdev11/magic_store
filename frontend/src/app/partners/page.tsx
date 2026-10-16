@@ -1,66 +1,65 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, Suspense } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { api, Partner } from "@/lib/api";
-import { formatVND, getBadgeClasses } from "@/lib/design-tokens";
+import { formatVND } from "@/lib/design-tokens";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/common/Button";
+import { Input } from "@/components/common/Input";
+import { Badge } from "@/components/common/Badge";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { PartnerFormModal } from "@/components/partners/PartnerFormModal";
 import {
   Users,
-  UserPlus,
+  Truck,
   Plus,
   Search,
-  Phone,
-  Building2,
-  X,
+  Pencil,
+  Trash2,
   RefreshCw,
   AlertCircle,
-  CreditCard,
-  UserCheck,
-  Truck,
+  CheckCircle2,
+  X,
 } from "lucide-react";
 
-// ponytail: minimal partner creation modal and list; upgrade to full ledger history, credit limit warnings, and payment vouchers in Phase 4
+// ponytail: in-memory list filtering by role and status; upgrade to server-side cursor pagination when partners exceed 1000 records.
+function PartnersContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
 
-const PARTNER_TYPE_LABELS: Record<string, { label: string; badge: "info" | "brand" | "matrix" }> = {
-  CUSTOMER: { label: "Khách hàng", badge: "brand" },
-  SUPPLIER: { label: "Nhà cung cấp", badge: "info" },
-  BOTH: { label: "Cả hai", badge: "matrix" },
-};
-
-const PRICE_TIER_LABELS: Record<string, string> = {
-  RETAIL: "Giá bán lẻ",
-  WHOLESALE: "Giá bán buôn/sỉ",
-  VIP: "Giá VIP",
-};
-
-export default function PartnersPage() {
   const [partners, setPartners] = useState<Partner[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Sync tab with URL search parameter
+  const typeParam = searchParams.get("type");
+  const activeTab: "SUPPLIER" | "CUSTOMER" =
+    typeParam === "SUPPLIER" ? "SUPPLIER" : "CUSTOMER";
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string>("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
 
-  // Modal
-  const [showModal, setShowModal] = useState(false);
-  const [modalSubmitting, setModalSubmitting] = useState(false);
-  const [modalError, setModalError] = useState<string | null>(null);
+  // Form modal state
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingPartner, setEditingPartner] = useState<Partner | null>(null);
 
-  // New partner form state
-  const [newName, setNewName] = useState("");
-  const [newPhone, setNewPhone] = useState("");
-  const [newAddress, setNewAddress] = useState("");
-  const [newType, setNewType] = useState<"CUSTOMER" | "SUPPLIER" | "BOTH">("CUSTOMER");
-  const [newPriceTier, setNewPriceTier] = useState("RETAIL");
+  // Deletion state
+  const [deletingPartner, setDeletingPartner] = useState<Partner | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const loadPartners = async () => {
     setIsLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
       const data = await api.getPartners();
       setPartners(data || []);
     } catch (err: any) {
-      setError(err.message || "Không thể tải danh sách đối tác");
+      setLoadError(err.message || "Không thể tải danh sách đối tác.");
     } finally {
       setIsLoading(false);
     }
@@ -70,216 +69,344 @@ export default function PartnersPage() {
     loadPartners();
   }, []);
 
+  const handleTabChange = (type: "SUPPLIER" | "CUSTOMER") => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("type", type);
+    router.push(`${pathname}?${params.toString()}`);
+  };
+
+  // Tab counts
+  const supplierCount = useMemo(
+    () => partners.filter((p) => p.partner_type === "SUPPLIER" || p.partner_type === "BOTH").length,
+    [partners]
+  );
+  const customerCount = useMemo(
+    () => partners.filter((p) => p.partner_type === "CUSTOMER" || p.partner_type === "BOTH").length,
+    [partners]
+  );
+
+  // Filtered partners
   const filteredPartners = useMemo(() => {
     return partners.filter((p) => {
+      // Role tab match: dual-role entities appear in both tabs
+      const matchesTab =
+        activeTab === "SUPPLIER"
+          ? p.partner_type === "SUPPLIER" || p.partner_type === "BOTH"
+          : p.partner_type === "CUSTOMER" || p.partner_type === "BOTH";
+
+      // Search match
+      const search = searchTerm.trim().toLowerCase();
       const matchesSearch =
-        p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (p.phone && p.phone.includes(searchTerm));
-      const matchesType = typeFilter === "ALL" || p.partner_type === typeFilter;
-      return matchesSearch && matchesType;
+        !search ||
+        p.name.toLowerCase().includes(search) ||
+        (p.phone && p.phone.toLowerCase().includes(search)) ||
+        (p.address && p.address.toLowerCase().includes(search));
+
+      // Status match
+      const isActive = p.is_active !== false;
+      const matchesStatus =
+        statusFilter === "ALL" ||
+        (statusFilter === "ACTIVE" && isActive) ||
+        (statusFilter === "INACTIVE" && !isActive);
+
+      return matchesTab && matchesSearch && matchesStatus;
     });
-  }, [partners, searchTerm, typeFilter]);
+  }, [partners, activeTab, searchTerm, statusFilter]);
 
-  const handleCreatePartner = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) {
-      setModalError("Vui lòng nhập tên đối tác");
-      return;
-    }
+  const handleOpenCreate = () => {
+    setEditingPartner(null);
+    setIsModalOpen(true);
+  };
 
-    setModalSubmitting(true);
-    setModalError(null);
+  const handleOpenEdit = (partner: Partner) => {
+    setEditingPartner(partner);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenDelete = (partner: Partner) => {
+    setDeleteError(null);
+    setDeletingPartner(partner);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingPartner) return;
+    setIsDeleting(true);
+    setDeleteError(null);
 
     try {
-      await api.createPartner({
-        name: newName.trim(),
-        phone: newPhone.trim() || undefined,
-        address: newAddress.trim() || undefined,
-        partner_type: newType,
-        price_tier: newPriceTier,
+      await api.deletePartner(deletingPartner.id);
+      const deletedName = deletingPartner.name;
+      setDeletingPartner(null);
+      setFeedback({
+        type: "success",
+        message: `Đã xóa đối tác "${deletedName}" thành công.`,
       });
-
-      // Reset and close
-      setNewName("");
-      setNewPhone("");
-      setNewAddress("");
-      setNewType("CUSTOMER");
-      setNewPriceTier("RETAIL");
-      setShowModal(false);
-
       await loadPartners();
     } catch (err: any) {
-      setModalError(err.message || "Không thể tạo đối tác mới");
+      setDeletingPartner(null);
+      // Display server error clearly (e.g. 409 Conflict: Đối tác đã phát sinh giao dịch, không thể xóa.)
+      setDeleteError(err.message || "Không thể xóa đối tác.");
     } finally {
-      setModalSubmitting(false);
+      setIsDeleting(false);
     }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-border-subtle pb-5">
+    <div className="space-y-4">
+      {/* Page Header with Tab Switcher */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border-subtle pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <Users className="w-6 h-6 text-brand" />
-            <h1 className="text-xl font-bold text-text-main">
-              Quản lý Đối tác & Sổ Nợ (Khách hàng & Nhà cung cấp)
-            </h1>
+            <Users className="w-5 h-5 text-brand shrink-0" />
+            <h1 className="text-lg font-bold text-text-main">Quản lý Đối tác & Sổ Nợ</h1>
           </div>
-          <p className="text-xs text-text-sub mt-1">
-            Theo dõi hạn mức nợ, lịch sử mua nợ và thu hồi công nợ theo thời gian thực
+          <p className="text-xs text-text-sub mt-0.5">
+            Theo dõi danh sách khách hàng, nhà cung cấp, hạn mức nợ và công nợ phát sinh
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {/* Header Tab Switcher */}
+          <div className="inline-flex p-0.5 bg-surface-app border border-border-default rounded-md">
+            <button
+              type="button"
+              onClick={() => handleTabChange("SUPPLIER")}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium rounded-sm transition-colors flex items-center gap-1.5",
+                activeTab === "SUPPLIER"
+                  ? "bg-brand text-white shadow-xs font-semibold"
+                  : "text-text-sub hover:text-text-main"
+              )}
+            >
+              <Truck className="w-3.5 h-3.5" />
+              Nhà cung cấp
+              <span className={cn(
+                "text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums",
+                activeTab === "SUPPLIER" ? "bg-white/20 text-white" : "bg-surface-muted text-text-sub"
+              )}>
+                {supplierCount}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTabChange("CUSTOMER")}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium rounded-sm transition-colors flex items-center gap-1.5",
+                activeTab === "CUSTOMER"
+                  ? "bg-brand text-white shadow-xs font-semibold"
+                  : "text-text-sub hover:text-text-main"
+              )}
+            >
+              <Users className="w-3.5 h-3.5" />
+              Khách hàng
+              <span className={cn(
+                "text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums",
+                activeTab === "CUSTOMER" ? "bg-white/20 text-white" : "bg-surface-muted text-text-sub"
+              )}>
+                {customerCount}
+              </span>
+            </button>
+          </div>
+
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={loadPartners}
             disabled={isLoading}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-text-sub bg-surface-card border border-border-default rounded-lg hover:text-text-main hover:bg-surface-app transition-colors"
+            title="Làm mới danh sách"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
             Làm mới
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowModal(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-brand rounded-lg hover:bg-brand-hover shadow-sm transition-colors"
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleOpenCreate}
+            className="shadow-sm"
           >
             <Plus className="w-4 h-4" />
-            Thêm đối tác mới
-          </button>
+            + Thêm đối tác
+          </Button>
         </div>
       </div>
 
-      {/* Error state */}
-      {error && (
-        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center justify-between">
+      {/* Global Alerts / Feedback */}
+      {feedback && (
+        <div
+          role="status"
+          className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-xs flex items-center justify-between"
+        >
           <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-            <span>{error}</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{feedback.message}</span>
           </div>
           <button
-            onClick={loadPartners}
-            className="underline font-medium hover:text-rose-900"
+            type="button"
+            onClick={() => setFeedback(null)}
+            className="p-0.5 text-emerald-600 hover:text-emerald-900 rounded-sm"
+            aria-label="Đóng thông báo"
           >
-            Thử lại
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-        <div className="relative w-full sm:w-72">
-          <Search className="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
+      {deleteError && (
+        <div
+          role="alert"
+          className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-md text-xs flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <div>
+              <span className="font-semibold">Không thể xóa đối tác: </span>
+              <span>{deleteError}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDeleteError(null)}
+            className="p-0.5 text-rose-600 hover:text-rose-900 rounded-sm"
+            aria-label="Đóng cảnh báo lỗi"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {loadError && (
+        <div
+          role="alert"
+          className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-md text-xs flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{loadError}</span>
+          </div>
+          <Button variant="outline" size="sm" onClick={loadPartners}>
+            Thử lại
+          </Button>
+        </div>
+      )}
+
+      {/* Filter Toolbar */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between bg-surface-card border border-border-default rounded-md p-3">
+        <div className="w-full sm:w-80">
+          <Input
+            placeholder="Tìm theo tên, số điện thoại, địa chỉ..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Tìm theo tên, số điện thoại..."
-            className="w-full pl-9 pr-3 py-2 text-xs bg-surface-card border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main"
+            leftIcon={<Search className="w-4 h-4" />}
           />
         </div>
 
-        <div className="flex items-center gap-1 bg-surface-card border border-border-default rounded-lg p-1 w-full sm:w-auto">
-          {[
-            { id: "ALL", label: "Tất cả" },
-            { id: "CUSTOMER", label: "Khách hàng" },
-            { id: "SUPPLIER", label: "Nhà cung cấp" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setTypeFilter(tab.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                typeFilter === tab.id
-                  ? "bg-brand text-white shadow-xs"
-                  : "text-text-sub hover:text-text-main"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 self-end sm:self-auto">
+          <label className="text-xs text-text-sub whitespace-nowrap">Trạng thái:</label>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as "ALL" | "ACTIVE" | "INACTIVE")}
+            className="h-9 bg-surface-card border border-border-default rounded-sm px-3 text-xs text-text-main focus:outline-none focus:border-border-focus focus:ring-1 focus:ring-border-focus transition-colors"
+          >
+            <option value="ALL">Tất cả trạng thái</option>
+            <option value="ACTIVE">Đang hoạt động</option>
+            <option value="INACTIVE">Ngừng hoạt động</option>
+          </select>
         </div>
       </div>
 
-      {/* Table listing partners */}
-      <div className="bg-surface-card border border-border-subtle rounded-xl overflow-hidden shadow-xs">
+      {/* Table: compact density with row height ~38px, px-3 py-2 */}
+      <div className="bg-surface-card border border-border-default rounded-md overflow-hidden shadow-card">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-surface-app border-b border-border-subtle text-text-muted font-medium uppercase tracking-wider">
-              <tr>
-                <th className="py-3 px-4">Tên đối tác</th>
-                <th className="py-3 px-4">Số điện thoại</th>
-                <th className="py-3 px-4">Loại đối tác</th>
-                <th className="py-3 px-4">Bảng giá</th>
-                <th className="py-3 px-4 text-right">Dư nợ hiện tại</th>
+          <table className="w-full text-left text-xs border-collapse">
+            <thead className="bg-surface-muted border-b border-border-default text-text-sub font-medium uppercase tracking-wider select-none">
+              <tr className="h-9">
+                <th className="px-3 py-2 font-medium">Tên đối tác</th>
+                <th className="px-3 py-2 font-medium">Số điện thoại</th>
+                <th className="px-3 py-2 font-medium">Địa chỉ</th>
+                <th className="px-3 py-2 font-medium text-right">Hạn mức nợ</th>
+                <th className="px-3 py-2 font-medium text-right">Dư nợ hiện tại</th>
+                <th className="px-3 py-2 font-medium text-center">Trạng thái</th>
+                <th className="px-3 py-2 font-medium text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-subtle text-text-main">
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-text-muted">
+                  <td colSpan={7} className="px-3 py-8 text-center text-text-sub">
                     <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-brand" />
-                    Đang tải dữ liệu đối tác...
+                    Đang tải danh sách đối tác...
                   </td>
                 </tr>
               ) : filteredPartners.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-text-muted">
-                    <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                    Chưa có đối tác nào phù hợp. Nhấn "Thêm đối tác mới" để bắt đầu.
+                  <td colSpan={7} className="px-3 py-8 text-center text-text-sub">
+                    <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    Không tìm thấy đối tác nào phù hợp.
                   </td>
                 </tr>
               ) : (
                 filteredPartners.map((partner) => {
-                  const debt =
-                    partner.current_debt_balance ?? partner.current_debt ?? 0;
+                  const debt = partner.current_debt_balance ?? partner.current_debt ?? 0;
                   const debtNumber = typeof debt === "string" ? parseFloat(debt) : debt;
-                  const typeMeta = PARTNER_TYPE_LABELS[partner.partner_type] || {
-                    label: partner.partner_type,
-                    badge: "info" as const,
-                  };
+                  const isBoth = partner.partner_type === "BOTH";
 
                   return (
                     <tr
                       key={partner.id}
-                      className="hover:bg-surface-app/50 transition-colors"
+                      className="h-[38px] hover:bg-surface-muted/50 transition-colors"
                     >
-                      <td className="py-3 px-4">
-                        <div className="font-medium text-text-main">
-                          {partner.name}
+                      <td className="px-3 py-2 font-medium text-text-main">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate max-w-xs">{partner.name}</span>
+                          {isBoth && (
+                            <Badge variant="matrix" className="text-[10px] py-0 px-1 font-normal">
+                              Cả hai
+                            </Badge>
+                          )}
                         </div>
-                        {partner.address && (
-                          <div className="text-[11px] text-text-sub truncate max-w-xs">
-                            {partner.address}
-                          </div>
+                      </td>
+                      <td className="px-3 py-2 font-mono tabular-nums text-text-sub">
+                        {partner.phone || "—"}
+                      </td>
+                      <td className="px-3 py-2 text-text-sub">
+                        <span className="truncate max-w-xs block" title={partner.address || ""}>
+                          {partner.address || "—"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 font-mono tabular-nums text-right text-text-main">
+                        {formatVND(partner.credit_limit || 0)}
+                      </td>
+                      <td className="px-3 py-2 font-mono tabular-nums text-right text-outflow">
+                        {formatVND(debtNumber)}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {partner.is_active !== false ? (
+                          <Badge variant="brand">Hoạt động</Badge>
+                        ) : (
+                          <Badge variant="default">Ngừng</Badge>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-text-sub font-mono">
-                        {partner.phone || "-"}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={getBadgeClasses(typeMeta.badge)}>
-                          {typeMeta.label}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-text-sub">
-                        {PRICE_TIER_LABELS[partner.price_tier || "RETAIL"] ||
-                          partner.price_tier ||
-                          "Giá bán lẻ"}
-                      </td>
-                      <td className="py-3 px-4 text-right font-semibold">
-                        <span
-                          className={
-                            debtNumber > 0
-                              ? "text-rose-600 font-mono"
-                              : debtNumber < 0
-                              ? "text-emerald-600 font-mono"
-                              : "text-text-sub font-mono"
-                          }
-                        >
-                          {formatVND(debtNumber)}
-                        </span>
+                      <td className="px-3 py-2 text-right">
+                        <div className="inline-flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            onClick={() => handleOpenEdit(partner)}
+                            title="Chỉnh sửa đối tác"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-text-sub hover:text-outflow"
+                            onClick={() => handleOpenDelete(partner)}
+                            title="Xóa đối tác"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -290,125 +417,42 @@ export default function PartnersPage() {
         </div>
       </div>
 
-      {/* Modal create partner */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-surface-card rounded-xl border border-border-subtle shadow-dropdown w-full max-w-md p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between border-b border-border-subtle pb-3">
-              <div className="flex items-center gap-2">
-                <UserPlus className="w-5 h-5 text-brand" />
-                <h3 className="text-sm font-semibold text-text-main">
-                  Thêm đối tác mới
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className="text-text-sub hover:text-text-main p-1 rounded"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* Partner Create/Edit Form Modal */}
+      <PartnerFormModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSuccess={loadPartners}
+        partner={editingPartner}
+        defaultType={activeTab}
+      />
 
-            {modalError && (
-              <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700">
-                {modalError}
-              </div>
-            )}
-
-            <form onSubmit={handleCreatePartner} className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-text-main block mb-1">
-                  Tên đối tác <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Công ty TNHH Hải Sản Biển Đông / Chị Lan..."
-                  className="w-full text-xs px-3 py-2 bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-text-main block mb-1">
-                  Loại đối tác
-                </label>
-                <select
-                  value={newType}
-                  onChange={(e) =>
-                    setNewType(e.target.value as "CUSTOMER" | "SUPPLIER" | "BOTH")
-                  }
-                  className="w-full text-xs px-3 py-2 bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main"
-                >
-                  <option value="CUSTOMER">Khách hàng</option>
-                  <option value="SUPPLIER">Nhà cung cấp</option>
-                  <option value="BOTH">Cả hai (Khách kiêm Nhà cung cấp)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-text-main block mb-1">
-                  Số điện thoại
-                </label>
-                <input
-                  type="text"
-                  value={newPhone}
-                  onChange={(e) => setNewPhone(e.target.value)}
-                  placeholder="0912345678"
-                  className="w-full text-xs px-3 py-2 bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-text-main block mb-1">
-                  Địa chỉ
-                </label>
-                <input
-                  type="text"
-                  value={newAddress}
-                  onChange={(e) => setNewAddress(e.target.value)}
-                  placeholder="123 Trần Phú, Nha Trang..."
-                  className="w-full text-xs px-3 py-2 bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-text-main block mb-1">
-                  Bảng giá áp dụng
-                </label>
-                <select
-                  value={newPriceTier}
-                  onChange={(e) => setNewPriceTier(e.target.value)}
-                  className="w-full text-xs px-3 py-2 bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main"
-                >
-                  <option value="RETAIL">Giá bán lẻ (RETAIL)</option>
-                  <option value="WHOLESALE">Giá bán buôn/sỉ (WHOLESALE)</option>
-                  <option value="VIP">Giá khách quen/VIP</option>
-                </select>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-border-subtle">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="px-3 py-1.5 text-xs text-text-sub hover:text-text-main border border-border-default rounded-lg hover:bg-surface-app"
-                >
-                  Hủy bỏ
-                </button>
-                <button
-                  type="submit"
-                  disabled={modalSubmitting}
-                  className="px-4 py-1.5 text-xs font-semibold text-white bg-brand rounded-lg hover:bg-brand-hover disabled:opacity-50"
-                >
-                  {modalSubmitting ? "Đang lưu..." : "Lưu đối tác"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!deletingPartner}
+        title="Xác nhận xóa đối tác"
+        description={`Bạn có chắc chắn muốn xóa đối tác "${deletingPartner?.name}"? Dữ liệu đã xóa không thể phục hồi.`}
+        confirmLabel="Xóa đối tác"
+        cancelLabel="Hủy"
+        variant="danger"
+        isLoading={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeletingPartner(null)}
+      />
     </div>
+  );
+}
+
+export default function PartnersPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center py-12 text-xs text-text-sub">
+          <RefreshCw className="w-4 h-4 animate-spin mr-2 text-brand" />
+          Đang tải trang đối tác...
+        </div>
+      }
+    >
+      <PartnersContent />
+    </Suspense>
   );
 }
