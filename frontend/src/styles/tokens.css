@@ -1,0 +1,57 @@
+:root {
+  /* Surfaces */
+  --surface-app: #f8fafc;
+  --surface-card: #ffffff;
+  --surface-card-hover: #f1f5f9;
+  --surface-muted: #f1f5f9;
+  --border-subtle: #e2e8f0;
+  --border-default: #cbd5e1;
+  --border-focus: #059669;
+
+  /* Typography / Text */
+  --text-main: #0f172a;
+  --text-sub: #64748b;
+  --text-disabled: #94a3b8;
+  --text-inverse: #ffffff;
+
+  /* Semantics */
+  --color-brand: #059669;
+  --color-brand-hover: #047857;
+  --color-brand-light: #ecfdf5;
+
+  --color-inflow: #059669;
+  --color-inflow-light: #ecfdf5;
+
+  --color-outflow: #e11d48;
+  --color-outflow-light: #fff1f2;
+
+  --color-alert: #f59e0b;
+  --color-alert-light: #fffbeb;
+
+  --color-info: #0284c7;
+  --color-info-light: #f0f9ff;
+
+  /* Industry Accents */
+  --accent-catchweight: #06b6d4;
+  --accent-catchweight-light: #ecfeff;
+
+  --accent-matrix: #8b5cf6;
+  --accent-matrix-light: #f5f3ff;
+
+  --accent-bom: #6366f1;
+  --accent-bom-light: #eef2ff;
+
+  --accent-modifier: #f97316;
+  --accent-modifier-light: #fff7ed;
+
+  /* Radius & Elevation */
+  --radius-sm: 0.25rem;
+  --radius-base: 0.5rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.07), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  --shadow-dropdown: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-popover: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
