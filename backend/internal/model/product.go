@@ -42,6 +42,8 @@ type Product struct {
 	TrackInventory  bool                   `gorm:"default:true" json:"track_inventory"`
 	TrackBatches    bool                   `gorm:"default:false" json:"track_batches"`
 	ProductionMode  ProductionMode         `gorm:"size:50;default:'NONE'" json:"production_mode"`
+	ImageURL        string                 `gorm:"size:512" json:"image_url,omitempty"`
+	Images          string                 `gorm:"type:text;default:'[]'" json:"images,omitempty"`
 	Variants        []ProductVariant       `gorm:"foreignKey:ProductID;constraint:OnDelete:CASCADE" json:"variants,omitempty"`
 	ModifierGroups  []ProductModifierGroup `gorm:"foreignKey:ProductID;constraint:OnDelete:CASCADE" json:"modifier_groups,omitempty"`
 	CreatedAt       time.Time              `json:"created_at"`
@@ -64,6 +66,7 @@ type ProductVariant struct {
 	Barcode            *string             `gorm:"uniqueIndex" json:"barcode,omitempty"`
 	VariantName        string              `gorm:"not null" json:"variant_name"`
 	Attributes         string              `gorm:"type:text;default:'{}'" json:"attributes"`
+	ImageURL           string              `gorm:"size:512" json:"image_url,omitempty"`
 	CostPrice          decimal.Decimal     `gorm:"type:decimal(15,2);default:0" json:"cost_price"`
 	BaseSellingPrice   decimal.Decimal     `gorm:"type:decimal(15,2);default:0" json:"base_selling_price"`
 	MinSellingPrice    decimal.Decimal     `gorm:"type:decimal(15,2);default:0" json:"min_selling_price"`

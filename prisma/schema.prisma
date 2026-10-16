@@ -160,6 +160,8 @@ model Product {
   track_inventory Boolean                @default(true)
   track_batches   Boolean                @default(false)
   production_mode ProductionMode         @default(NONE)
+  image_url       String?
+  images          Json?                  @default("[]") @db.JsonB
   variants        ProductVariant[]
   modifier_groups ProductModifierGroup[]
   created_at      DateTime               @default(now())
@@ -177,6 +179,7 @@ model ProductVariant {
   barcode               String?             @unique
   variant_name          String
   attributes            Json                @default("{}") @db.JsonB
+  image_url             String?
   cost_price            Decimal             @default(0) @db.Decimal(15, 2)
   base_selling_price    Decimal             @default(0) @db.Decimal(15, 2)
   min_selling_price     Decimal             @default(0) @db.Decimal(15, 2)
