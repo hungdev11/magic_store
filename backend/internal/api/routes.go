@@ -59,6 +59,9 @@ func NewServer(
 	mux.HandleFunc("POST /api/production/assembly", s.handleAssembly)
 	mux.HandleFunc("POST /api/production/disassembly", s.handleDisassembly)
 
+	// POS Terminal
+	mux.HandleFunc("POST /api/pos/checkout", s.handlePosCheckout)
+
 	s.router = corsMiddleware(mux)
 	return s
 }

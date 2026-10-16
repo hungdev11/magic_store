@@ -535,3 +535,331 @@ func TestAPI_Wastage(t *testing.T) {
 		t.Fatalf("expected expense amount 120000, got %s", cashTx.Amount.String())
 	}
 }
+
+func TestAPI_PosCheckout(t *testing.T) {
+	srv, db := setupAPITestServer(t)
+
+	cat := &model.Category{Name: "Bán Hàng Tổng Hợp", Code: "CAT_POS"}
+	db.Create(cat)
+
+	// -------------------------------------------------------------------------
+	// 1. Catch-weight fish sale (1.35 kg)
+	// -------------------------------------------------------------------------
+	prodFish := &model.Product{
+		Name:        "Cá Chẽm Cân Ký",
+		Code:        "PROD_FISH_CW",
+		CategoryID:  cat.ID,
+		ProductType: model.ProductTypeFinishedGood,
+		BaseUom:     "kg",
+		IsWeighable: true,
+	}
+	db.Create(prodFish)
+
+	varFish := &model.ProductVariant{
+		ProductID:        prodFish.ID,
+		Sku:              "SKU-FISH-CW",
+		VariantName:      "Cá Chẽm Tươi Sống",
+		CostPrice:        decimal.NewFromInt(100000),
+		BaseSellingPrice: decimal.NewFromInt(160000),
+		MinSellingPrice:  decimal.NewFromInt(140000),
+		CurrentStock:     decimal.NewFromInt(20),
+	}
+	db.Create(varFish)
+
+	fishCheckoutReq := map[string]interface{}{
+		"items": []map[string]interface{}{
+			{
+				"variant_id":               varFish.ID,
+				"sold_uom":                 "con",
+				"sold_qty":                 1,
+				"actual_base_qty_deducted": 1.35,
+				"actual_unit_price":        160000,
+				"is_return":                false,
+			},
+		},
+		"subtotal":         216000,
+		"discount_amount":  0,
+		"surcharge_amount": 0,
+		"total_amount":     216000,
+		"paid_amount":      216000,
+		"debt_amount":      0,
+		"payment_method":   "CASH",
+		"notes":            "Bán cá chẽm cân 1.35kg",
+	}
+	body, _ := json.Marshal(fishCheckoutReq)
+	req, _ := http.NewRequest(http.MethodPost, "/api/pos/checkout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := executeRequest(srv, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Test 1 (Catch-weight fish) failed: expected status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var updatedFish model.ProductVariant
+	db.First(&updatedFish, "id = ?", varFish.ID)
+	expectedFishStock := decimal.RequireFromString("18.65")
+	if !updatedFish.CurrentStock.Equal(expectedFishStock) {
+		t.Fatalf("expected fish stock %s, got %s", expectedFishStock, updatedFish.CurrentStock)
+	}
+
+	var fishMov model.InventoryMovement
+	if err := db.Where("variant_id = ? AND movement_type = ?", varFish.ID, model.MovementTypeSaleOut).First(&fishMov).Error; err != nil {
+		t.Fatalf("expected fish SALE_OUT movement: %v", err)
+	}
+	if !fishMov.QtyInBaseUom.Equal(decimal.RequireFromString("-1.35")) {
+		t.Fatalf("expected fish movement qty -1.35, got %s", fishMov.QtyInBaseUom)
+	}
+
+	// -------------------------------------------------------------------------
+	// 2. Apparel 1-touch exchange: Return shirt M (+1), take shirt L (-1)
+	// -------------------------------------------------------------------------
+	prodShirt := &model.Product{
+		Name:        "Áo Sơ Mi Nam",
+		Code:        "PROD_SHIRT",
+		CategoryID:  cat.ID,
+		ProductType: model.ProductTypeFinishedGood,
+		BaseUom:     "cái",
+	}
+	db.Create(prodShirt)
+
+	varShirtM := &model.ProductVariant{
+		ProductID:        prodShirt.ID,
+		Sku:              "SHIRT-M",
+		VariantName:      "Áo Sơ Mi Trắng Size M",
+		CostPrice:        decimal.NewFromInt(200000),
+		BaseSellingPrice: decimal.NewFromInt(350000),
+		CurrentStock:     decimal.NewFromInt(5),
+	}
+	db.Create(varShirtM)
+
+	varShirtL := &model.ProductVariant{
+		ProductID:        prodShirt.ID,
+		Sku:              "SHIRT-L",
+		VariantName:      "Áo Sơ Mi Trắng Size L",
+		CostPrice:        decimal.NewFromInt(220000),
+		BaseSellingPrice: decimal.NewFromInt(380000),
+		CurrentStock:     decimal.NewFromInt(5),
+	}
+	db.Create(varShirtL)
+
+	exchangeReq := map[string]interface{}{
+		"items": []map[string]interface{}{
+			{
+				"variant_id":               varShirtM.ID,
+				"sold_uom":                 "cái",
+				"sold_qty":                 1,
+				"actual_base_qty_deducted": 1,
+				"actual_unit_price":        350000,
+				"is_return":                true,
+			},
+			{
+				"variant_id":               varShirtL.ID,
+				"sold_uom":                 "cái",
+				"sold_qty":                 1,
+				"actual_base_qty_deducted": 1,
+				"actual_unit_price":        380000,
+				"is_return":                false,
+			},
+		},
+		"subtotal":         30000,
+		"discount_amount":  0,
+		"surcharge_amount": 0,
+		"total_amount":     30000,
+		"paid_amount":      30000,
+		"debt_amount":      0,
+		"payment_method":   "CASH",
+		"notes":            "Đổi áo size M lấy L bù 30k",
+	}
+	body, _ = json.Marshal(exchangeReq)
+	req, _ = http.NewRequest(http.MethodPost, "/api/pos/checkout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = executeRequest(srv, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Test 2 (Apparel exchange) failed: expected status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var freshShirtM, freshShirtL model.ProductVariant
+	db.First(&freshShirtM, "id = ?", varShirtM.ID)
+	db.First(&freshShirtL, "id = ?", varShirtL.ID)
+	if !freshShirtM.CurrentStock.Equal(decimal.NewFromInt(6)) {
+		t.Fatalf("expected shirt M stock 6, got %s", freshShirtM.CurrentStock)
+	}
+	if !freshShirtL.CurrentStock.Equal(decimal.NewFromInt(4)) {
+		t.Fatalf("expected shirt L stock 4, got %s", freshShirtL.CurrentStock)
+	}
+
+	var returnMov model.InventoryMovement
+	if err := db.Where("variant_id = ? AND movement_type = ?", varShirtM.ID, model.MovementTypeReturnIn).First(&returnMov).Error; err != nil {
+		t.Fatalf("expected RETURN_IN movement for shirt M: %v", err)
+	}
+
+	// -------------------------------------------------------------------------
+	// 3. Food sale with modifier topping (Trứng ốp la)
+	// -------------------------------------------------------------------------
+	prodCrust := &model.Product{Name: "Vỏ bánh mì", Code: "POS_CRUST", CategoryID: cat.ID, ProductType: model.ProductTypeRawMaterial, BaseUom: "cái"}
+	db.Create(prodCrust)
+	varCrust := &model.ProductVariant{ProductID: prodCrust.ID, Sku: "SKU-CRUST-P", VariantName: "Vỏ bánh mì", CurrentStock: decimal.NewFromInt(50), CostPrice: decimal.NewFromInt(2000)}
+	db.Create(varCrust)
+
+	prodEgg := &model.Product{Name: "Trứng gà tươi", Code: "POS_EGG", CategoryID: cat.ID, ProductType: model.ProductTypeRawMaterial, BaseUom: "quả"}
+	db.Create(prodEgg)
+	varEgg := &model.ProductVariant{ProductID: prodEgg.ID, Sku: "SKU-EGG-P", VariantName: "Trứng gà tươi", CurrentStock: decimal.NewFromInt(30), CostPrice: decimal.NewFromInt(3000)}
+	db.Create(varEgg)
+
+	prodBanhMi := &model.Product{
+		Name:           "Bánh Mì Kẹp",
+		Code:           "POS_BANHMI",
+		CategoryID:     cat.ID,
+		ProductType:    model.ProductTypeFinishedGood,
+		BaseUom:        "ổ",
+		ProductionMode: model.ProductionModePosBackflush,
+	}
+	db.Create(prodBanhMi)
+
+	varBanhMi := &model.ProductVariant{
+		ProductID:        prodBanhMi.ID,
+		Sku:              "SKU-BM-P",
+		VariantName:      "Bánh Mì Thịt",
+		CurrentStock:     decimal.Zero,
+		CostPrice:        decimal.NewFromInt(10000),
+		BaseSellingPrice: decimal.NewFromInt(25000),
+	}
+	db.Create(varBanhMi)
+
+	recipeBM := &model.BomRecipe{
+		TargetVariantID: varBanhMi.ID,
+		RecipeType:      model.RecipeTypeAssembly,
+		OutputQty:       decimal.NewFromInt(1),
+		Items: []model.BomItem{
+			{ComponentVariantID: varCrust.ID, QtyRequired: decimal.NewFromInt(1)},
+		},
+	}
+	db.Create(recipeBM)
+
+	foodReq := map[string]interface{}{
+		"items": []map[string]interface{}{
+			{
+				"variant_id":               varBanhMi.ID,
+				"sold_uom":                 "ổ",
+				"sold_qty":                 1,
+				"actual_base_qty_deducted": 1,
+				"actual_unit_price":        25000,
+				"is_return":                false,
+				"modifiers": []map[string]interface{}{
+					{
+						"name":              "Trứng Ốp La",
+						"price":             5000,
+						"linked_variant_id": varEgg.ID,
+						"deduct_qty":        1,
+					},
+				},
+			},
+		},
+		"subtotal":         30000,
+		"discount_amount":  0,
+		"surcharge_amount": 0,
+		"total_amount":     30000,
+		"paid_amount":      30000,
+		"debt_amount":      0,
+		"payment_method":   "CASH",
+		"notes":            "Bánh mì thêm trứng",
+	}
+	body, _ = json.Marshal(foodReq)
+	req, _ = http.NewRequest(http.MethodPost, "/api/pos/checkout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = executeRequest(srv, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Test 3 (Food with modifier) failed: expected status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var freshCrust, freshEgg model.ProductVariant
+	db.First(&freshCrust, "id = ?", varCrust.ID)
+	db.First(&freshEgg, "id = ?", varEgg.ID)
+	if !freshCrust.CurrentStock.Equal(decimal.NewFromInt(49)) {
+		t.Fatalf("expected crust stock 49 (deducted by backflush), got %s", freshCrust.CurrentStock)
+	}
+	if !freshEgg.CurrentStock.Equal(decimal.NewFromInt(29)) {
+		t.Fatalf("expected egg stock 29 (deducted by modifier), got %s", freshEgg.CurrentStock)
+	}
+
+	// -------------------------------------------------------------------------
+	// 4. Credit sale (debt_amount > 0)
+	// -------------------------------------------------------------------------
+	customer := &model.Partner{
+		Name:               "Nguyễn Văn A",
+		PartnerType:        model.PartnerTypeCustomer,
+		CurrentDebtBalance: decimal.NewFromInt(50000),
+	}
+	db.Create(customer)
+
+	creditReq := map[string]interface{}{
+		"customer_id": customer.ID,
+		"items": []map[string]interface{}{
+			{
+				"variant_id":               varShirtL.ID,
+				"sold_uom":                 "cái",
+				"sold_qty":                 1,
+				"actual_base_qty_deducted": 1,
+				"actual_unit_price":        380000,
+				"is_return":                false,
+			},
+		},
+		"subtotal":         380000,
+		"discount_amount":  0,
+		"surcharge_amount": 0,
+		"total_amount":     380000,
+		"paid_amount":      100000,
+		"debt_amount":      280000,
+		"payment_method":   "MIXED",
+		"notes":            "Khách trả trước 100k ghi nợ 280k",
+	}
+	body, _ = json.Marshal(creditReq)
+	req, _ = http.NewRequest(http.MethodPost, "/api/pos/checkout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = executeRequest(srv, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Test 4 (Credit sale) failed: expected status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var freshCustomer model.Partner
+	db.First(&freshCustomer, "id = ?", customer.ID)
+	expectedDebt := decimal.NewFromInt(330000) // 50,000 + 280,000 = 330,000
+	if !freshCustomer.CurrentDebtBalance.Equal(expectedDebt) {
+		t.Fatalf("expected customer debt %s, got %s", expectedDebt, freshCustomer.CurrentDebtBalance)
+	}
+
+	var debtLedger model.DebtLedger
+	if err := db.Where("partner_id = ? AND transaction_type = ?", customer.ID, model.DebtTransactionTypeSaleDebt).First(&debtLedger).Error; err != nil {
+		t.Fatalf("expected SALE_DEBT ledger entry: %v", err)
+	}
+	if !debtLedger.Amount.Equal(decimal.NewFromInt(280000)) {
+		t.Fatalf("expected debt ledger amount 280000, got %s", debtLedger.Amount)
+	}
+	if !debtLedger.BalanceAfter.Equal(expectedDebt) {
+		t.Fatalf("expected debt ledger balance_after %s, got %s", expectedDebt, debtLedger.BalanceAfter)
+	}
+
+	// -------------------------------------------------------------------------
+	// 5. Min selling price violation check (should fail 400)
+	// -------------------------------------------------------------------------
+	violatingReq := map[string]interface{}{
+		"items": []map[string]interface{}{
+			{
+				"variant_id":               varFish.ID, // min selling price is 140,000
+				"sold_uom":                 "con",
+				"sold_qty":                 1,
+				"actual_base_qty_deducted": 1,
+				"actual_unit_price":        100000, // below 140,000!
+				"is_return":                false,
+			},
+		},
+		"total_amount": 100000,
+		"paid_amount":  100000,
+	}
+	body, _ = json.Marshal(violatingReq)
+	req, _ = http.NewRequest(http.MethodPost, "/api/pos/checkout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = executeRequest(srv, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 for min selling price violation, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

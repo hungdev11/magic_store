@@ -691,3 +691,405 @@ func (s *Server) handleDisassembly(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, order)
 }
+
+// ----------------------------------------------------------------------------
+// POS Checkout Handlers
+// ----------------------------------------------------------------------------
+
+type PosCheckoutModifierRequest struct {
+	Name            string          `json:"name"`
+	Price           decimal.Decimal `json:"price"`
+	LinkedVariantID string          `json:"linked_variant_id"`
+	DeductQty       decimal.Decimal `json:"deduct_qty"`
+}
+
+type PosCheckoutItemRequest struct {
+	VariantID             string                       `json:"variant_id"`
+	SoldUom               string                       `json:"sold_uom"`
+	SoldQty               decimal.Decimal              `json:"sold_qty"`
+	ActualBaseQtyDeducted decimal.Decimal              `json:"actual_base_qty_deducted"`
+	OriginalUnitPrice     decimal.Decimal              `json:"original_unit_price"`
+	ActualUnitPrice       decimal.Decimal              `json:"actual_unit_price"`
+	LineTotal             decimal.Decimal              `json:"line_total"`
+	IsReturn              bool                         `json:"is_return"`
+	Modifiers             []PosCheckoutModifierRequest `json:"modifiers"`
+	ModifiersJSON         *string                      `json:"modifiers_json"`
+	BatchID               *string                      `json:"batch_id"`
+}
+
+type PosCheckoutRequest struct {
+	PosSessionID    *string                  `json:"pos_session_id"`
+	CustomerID      *string                  `json:"customer_id"`
+	Items           []PosCheckoutItemRequest `json:"items"`
+	Subtotal        decimal.Decimal          `json:"subtotal"`
+	DiscountAmount  decimal.Decimal          `json:"discount_amount"`
+	SurchargeAmount decimal.Decimal          `json:"surcharge_amount"`
+	TotalAmount     decimal.Decimal          `json:"total_amount"`
+	PaidAmount      decimal.Decimal          `json:"paid_amount"`
+	DebtAmount      decimal.Decimal          `json:"debt_amount"`
+	PaymentMethod   model.PaymentMethod      `json:"payment_method"`
+	Notes           *string                  `json:"notes"`
+}
+
+// handlePosCheckout processes a complete POS sale or exchange in one atomic transaction.
+// ponytail: in-memory sequence generation for order numbers; upgrade to database sequence/redis when multi-instance concurrency needed.
+func (s *Server) handlePosCheckout(w http.ResponseWriter, r *http.Request) {
+	var req PosCheckoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.Items) == 0 {
+		writeError(w, http.StatusBadRequest, "items cannot be empty")
+		return
+	}
+
+	if req.PosSessionID != nil && *req.PosSessionID == "" {
+		req.PosSessionID = nil
+	}
+	if req.CustomerID != nil && *req.CustomerID == "" {
+		req.CustomerID = nil
+	}
+
+	tx := s.db.WithContext(r.Context()).Begin()
+	defer func() {
+		if rec := recover(); rec != nil {
+			tx.Rollback()
+			panic(rec)
+		}
+	}()
+
+	var count int64
+	todayPrefix := fmt.Sprintf("HD-%s-%%", time.Now().Format("20060102"))
+	tx.Model(&model.SalesOrder{}).Where("order_number LIKE ?", todayPrefix).Count(&count)
+	orderNumber := fmt.Sprintf("HD-%s-%04d", time.Now().Format("20060102"), count+1)
+	orderID := uuid.New().String()
+
+	var orderItems []model.SalesOrderItem
+	totalCogs := decimal.Zero
+	calcSubtotal := decimal.Zero
+
+	for _, itemReq := range req.Items {
+		if itemReq.VariantID == "" {
+			tx.Rollback()
+			writeError(w, http.StatusBadRequest, "variant_id is required")
+			return
+		}
+
+		var variant model.ProductVariant
+		if err := tx.Preload("Product").First(&variant, "id = ?", itemReq.VariantID).Error; err != nil {
+			tx.Rollback()
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("variant not found: %s", itemReq.VariantID))
+			} else {
+				writeError(w, http.StatusInternalServerError, err.Error())
+			}
+			return
+		}
+
+		soldQty := itemReq.SoldQty
+		if soldQty.IsZero() {
+			soldQty = decimal.NewFromInt(1)
+		}
+
+		actualBaseQty := itemReq.ActualBaseQtyDeducted
+		if actualBaseQty.IsZero() {
+			actualBaseQty = soldQty
+		}
+
+		actualUnitPrice := itemReq.ActualUnitPrice
+		if actualUnitPrice.IsZero() {
+			actualUnitPrice = variant.BaseSellingPrice
+		}
+
+		origUnitPrice := itemReq.OriginalUnitPrice
+		if origUnitPrice.IsZero() {
+			if variant.BaseSellingPrice.IsPositive() {
+				origUnitPrice = variant.BaseSellingPrice
+			} else {
+				origUnitPrice = actualUnitPrice
+			}
+		}
+
+		if !itemReq.IsReturn && variant.MinSellingPrice.IsPositive() && actualUnitPrice.LessThan(variant.MinSellingPrice) {
+			tx.Rollback()
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("đơn giá %s thấp hơn giá sàn %s của sản phẩm %s", actualUnitPrice, variant.MinSellingPrice, variant.VariantName))
+			return
+		}
+
+		soldUom := itemReq.SoldUom
+		if soldUom == "" && variant.Product != nil {
+			soldUom = variant.Product.BaseUom
+		}
+
+		var lineCogs decimal.Decimal
+		var modJSONStr *string
+
+		if len(itemReq.Modifiers) > 0 {
+			modBytes, err := json.Marshal(itemReq.Modifiers)
+			if err == nil {
+				str := string(modBytes)
+				modJSONStr = &str
+			}
+		} else if itemReq.ModifiersJSON != nil {
+			modJSONStr = itemReq.ModifiersJSON
+		}
+
+		if itemReq.IsReturn {
+			reason := fmt.Sprintf("POS return: %s", orderNumber)
+			_, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
+				VariantID:      variant.ID,
+				BatchID:        itemReq.BatchID,
+				MovementType:   model.MovementTypeReturnIn,
+				QtyInBaseUom:   actualBaseQty,
+				InputUOM:       soldUom,
+				InputQty:       soldQty,
+				UnitCostAtTime: variant.CostPrice,
+				ReferenceID:    &orderID,
+				ReasonNote:     &reason,
+			})
+			if err != nil {
+				tx.Rollback()
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			lineCogs = actualBaseQty.Mul(variant.CostPrice).Neg()
+		} else {
+			reason := fmt.Sprintf("POS sale: %s", orderNumber)
+			_, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
+				VariantID:      variant.ID,
+				BatchID:        itemReq.BatchID,
+				MovementType:   model.MovementTypeSaleOut,
+				QtyInBaseUom:   actualBaseQty.Neg(),
+				InputUOM:       soldUom,
+				InputQty:       soldQty,
+				UnitCostAtTime: variant.CostPrice,
+				ReferenceID:    &orderID,
+				ReasonNote:     &reason,
+			})
+			if err != nil {
+				tx.Rollback()
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			lineCogs = actualBaseQty.Mul(variant.CostPrice)
+
+			if variant.Product != nil && variant.Product.ProductionMode == model.ProductionModePosBackflush {
+				_, err := s.bomService.ExecuteBackflushDeduction(r.Context(), tx, service.BackflushParams{
+					Items: []service.BackflushItem{
+						{
+							VariantID:     variant.ID,
+							Qty:           soldQty,
+							ModifiersJSON: "",
+							ReferenceID:   &orderID,
+						},
+					},
+				})
+				if err != nil {
+					tx.Rollback()
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			}
+
+			for _, mod := range itemReq.Modifiers {
+				if mod.LinkedVariantID != "" && mod.DeductQty.GreaterThan(decimal.Zero) {
+					var modVariant model.ProductVariant
+					if err := tx.Preload("Product").First(&modVariant, "id = ?", mod.LinkedVariantID).Error; err != nil {
+						tx.Rollback()
+						writeError(w, http.StatusBadRequest, fmt.Sprintf("modifier linked variant not found: %s", mod.LinkedVariantID))
+						return
+					}
+					modDeductTotal := mod.DeductQty.Mul(soldQty)
+					modUom := ""
+					if modVariant.Product != nil {
+						modUom = modVariant.Product.BaseUom
+					}
+					modNote := fmt.Sprintf("Modifier topping: %s (Đơn %s)", mod.Name, orderNumber)
+					_, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
+						VariantID:      modVariant.ID,
+						MovementType:   model.MovementTypeSaleOut,
+						QtyInBaseUom:   modDeductTotal.Neg(),
+						InputUOM:       modUom,
+						InputQty:       modDeductTotal.Neg(),
+						UnitCostAtTime: modVariant.CostPrice,
+						ReferenceID:    &orderID,
+						ReasonNote:     &modNote,
+					})
+					if err != nil {
+						tx.Rollback()
+						writeError(w, http.StatusInternalServerError, err.Error())
+						return
+					}
+					lineCogs = lineCogs.Add(modDeductTotal.Mul(modVariant.CostPrice))
+				}
+			}
+		}
+
+		lineTotal := itemReq.LineTotal
+		if lineTotal.IsZero() {
+			baseAmount := actualUnitPrice.Mul(soldQty)
+			if actualBaseQty.GreaterThan(decimal.Zero) && !actualBaseQty.Equal(soldQty) {
+				baseAmount = actualUnitPrice.Mul(actualBaseQty)
+			}
+			for _, mod := range itemReq.Modifiers {
+				baseAmount = baseAmount.Add(mod.Price.Mul(soldQty))
+			}
+			if itemReq.IsReturn {
+				lineTotal = baseAmount.Neg()
+			} else {
+				lineTotal = baseAmount
+			}
+		}
+
+		calcSubtotal = calcSubtotal.Add(lineTotal)
+		totalCogs = totalCogs.Add(lineCogs)
+
+		orderItems = append(orderItems, model.SalesOrderItem{
+			OrderID:               orderID,
+			VariantID:             variant.ID,
+			BatchID:               itemReq.BatchID,
+			SoldUom:               soldUom,
+			SoldQty:               soldQty,
+			ActualBaseQtyDeducted: actualBaseQty,
+			OriginalUnitPrice:     origUnitPrice,
+			ActualUnitPrice:       actualUnitPrice,
+			LineTotal:             lineTotal,
+			ModifiersJSON:         modJSONStr,
+			LineCogs:              lineCogs,
+			IsReturn:              itemReq.IsReturn,
+		})
+	}
+
+	subtotal := req.Subtotal
+	if subtotal.IsZero() && !calcSubtotal.IsZero() {
+		subtotal = calcSubtotal
+	}
+	totalAmount := req.TotalAmount
+	if totalAmount.IsZero() {
+		totalAmount = subtotal.Sub(req.DiscountAmount).Add(req.SurchargeAmount)
+	}
+	paidAmount := req.PaidAmount
+	debtAmount := req.DebtAmount
+	if paidAmount.IsZero() && debtAmount.IsZero() {
+		paidAmount = totalAmount
+	}
+
+	paymentMethod := req.PaymentMethod
+	if paymentMethod == "" {
+		paymentMethod = model.PaymentMethodCash
+	}
+
+	salesOrder := model.SalesOrder{
+		ID:              orderID,
+		OrderNumber:     orderNumber,
+		CustomerID:      req.CustomerID,
+		PosSessionID:    req.PosSessionID,
+		Status:          model.OrderStatusCompleted,
+		Subtotal:        subtotal,
+		DiscountAmount:  req.DiscountAmount,
+		SurchargeAmount: req.SurchargeAmount,
+		TotalAmount:     totalAmount,
+		PaidAmount:      paidAmount,
+		DebtAmount:      debtAmount,
+		TotalCogs:       totalCogs,
+		PaymentMethod:   paymentMethod,
+		Items:           orderItems,
+	}
+
+	if err := tx.Create(&salesOrder).Error; err != nil {
+		tx.Rollback()
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if debtAmount.GreaterThan(decimal.Zero) {
+		if req.CustomerID == nil || *req.CustomerID == "" {
+			tx.Rollback()
+			writeError(w, http.StatusBadRequest, "customer_id is required when debt_amount > 0")
+			return
+		}
+		var customer model.Partner
+		if err := tx.First(&customer, "id = ?", *req.CustomerID).Error; err != nil {
+			tx.Rollback()
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("customer not found: %s", *req.CustomerID))
+			return
+		}
+
+		newDebtBalance := customer.CurrentDebtBalance.Add(debtAmount)
+		debtNote := fmt.Sprintf("Ghi nợ đơn bán hàng POS %s", orderNumber)
+		debtLedger := model.DebtLedger{
+			PartnerID:       customer.ID,
+			TransactionType: model.DebtTransactionTypeSaleDebt,
+			ReferenceID:     &orderID,
+			Amount:          debtAmount,
+			BalanceAfter:    newDebtBalance,
+			Note:            &debtNote,
+		}
+		if err := tx.Create(&debtLedger).Error; err != nil {
+			tx.Rollback()
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		if err := tx.Model(&model.Partner{}).Where("id = ?", customer.ID).Update("current_debt_balance", newDebtBalance).Error; err != nil {
+			tx.Rollback()
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	if paidAmount.GreaterThan(decimal.Zero) {
+		cbMethod := model.CashbookPaymentMethodCash
+		if paymentMethod == model.PaymentMethodBankQR {
+			cbMethod = model.CashbookPaymentMethodBankTransfer
+		}
+
+		cashTx := model.CashbookTransaction{
+			TransactionType: model.CashbookTypeInflow,
+			Category:        model.CashbookCategorySalesRevenue,
+			Amount:          paidAmount,
+			PaymentMethod:   cbMethod,
+			SalesOrderID:    &orderID,
+			PosSessionID:    req.PosSessionID,
+			PartnerID:       req.CustomerID,
+			Description:     fmt.Sprintf("Thu tiền bán hàng POS %s", orderNumber),
+		}
+		if err := tx.Create(&cashTx).Error; err != nil {
+			tx.Rollback()
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	if req.PosSessionID != nil && *req.PosSessionID != "" {
+		var posSession model.PosSession
+		if err := tx.First(&posSession, "id = ?", *req.PosSessionID).Error; err == nil {
+			cashAdd := decimal.Zero
+			bankAdd := decimal.Zero
+			if paymentMethod == model.PaymentMethodBankQR {
+				bankAdd = paidAmount
+			} else {
+				cashAdd = paidAmount
+			}
+			_ = tx.Model(&posSession).Updates(map[string]interface{}{
+				"total_sales_amount":   gorm.Expr("total_sales_amount + ?", totalAmount),
+				"total_cash_collected": gorm.Expr("total_cash_collected + ?", cashAdd),
+				"total_bank_collected": gorm.Expr("total_bank_collected + ?", bankAdd),
+			}).Error
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var resultOrder model.SalesOrder
+	if err := s.db.Preload("Items.Variant.Product").Preload("Customer").First(&resultOrder, "id = ?", orderID).Error; err != nil {
+		writeJSON(w, http.StatusCreated, salesOrder)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, resultOrder)
+}
