@@ -193,16 +193,23 @@ export default function PosPage() {
       return;
     }
 
+    // Snapshot receipt values before checkout clears cart in store
+    const snapshotTotalAmount = getTotalAmount();
+    const snapshotDebtAmount = debt;
+    const snapshotChangeAmount = getChangeAmount();
+    const snapshotCustomerName = selectedCustomer?.name || "Khách lẻ (Vãng lai)";
+    const snapshotPaymentMethod = paymentMethod;
+
     setIsCheckingOut(true);
     try {
       const res = await checkout("Đơn bán hàng POS");
       setCheckoutSuccess({
         orderId: res.order_number || res.id || "POS-OFFLINE",
-        totalAmount: getTotalAmount(),
-        paymentMethod,
-        customerName: selectedCustomer?.name || "Khách lẻ (Vãng lai)",
-        debtAmount: getDebtAmount(),
-        changeAmount: getChangeAmount(),
+        totalAmount: snapshotTotalAmount,
+        paymentMethod: snapshotPaymentMethod,
+        customerName: snapshotCustomerName,
+        debtAmount: snapshotDebtAmount,
+        changeAmount: snapshotChangeAmount,
         isOffline: Boolean(res.offline),
       });
     } catch (err: any) {
@@ -303,7 +310,7 @@ export default function PosPage() {
     setActiveMatrixModal(null);
   };
 
-  const handleMatrixSelectSingle = (variant: ProductVariant) => {
+  const handleMatrixSelectSingle = (variant: ProductVariant, qty: number = 1) => {
     if (!activeMatrixModal) return;
     if (isWeighableProduct(activeMatrixModal)) {
       setActiveMatrixModal(null);
@@ -312,7 +319,7 @@ export default function PosPage() {
       setActiveMatrixModal(null);
       setActiveModifierModal({ product: activeMatrixModal, variant });
     } else {
-      addItem(variant, activeMatrixModal);
+      addItem(variant, activeMatrixModal, { soldQty: qty });
       setActiveMatrixModal(null);
     }
   };
@@ -361,6 +368,24 @@ export default function PosPage() {
         if (cart.length > 0) {
           clearCart();
         }
+      } else if (e.key === "Delete") {
+        const isModalOpen = Boolean(
+          activeWeighModal ||
+            activeMatrixModal ||
+            activeModifierModal ||
+            isCustomerModalOpen ||
+            activePriceModal ||
+            checkoutSuccess
+        );
+        const target = e.target as HTMLElement | null;
+        const isTyping =
+          (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") &&
+          (target as HTMLInputElement).value?.length > 0;
+
+        if (!isModalOpen && cart.length > 0 && !isTyping) {
+          e.preventDefault();
+          removeItem(cart[cart.length - 1].id);
+        }
       } else if (e.key === "Escape") {
         if (activeWeighModal) setActiveWeighModal(null);
         else if (activeMatrixModal) setActiveMatrixModal(null);
@@ -387,6 +412,7 @@ export default function PosPage() {
     checkoutSuccess,
     toggleItemReturn,
     clearCart,
+    removeItem,
     handleTriggerCheckout,
   ]);
 

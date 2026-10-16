@@ -17,7 +17,7 @@ export interface PosMatrixModalProps {
   onClose: () => void;
   product: Product;
   onConfirm: (selections: MatrixSelectionItem[]) => void;
-  onSelectSingle?: (variant: ProductVariant) => void;
+  onSelectSingle?: (variant: ProductVariant, qty: number) => void;
 }
 
 // ponytail: interactive attribute rows selector; upgrade to dynamic facet hierarchy if cascading dependencies between attributes are required.
@@ -94,7 +94,7 @@ export const PosMatrixModal: React.FC<PosMatrixModalProps> = ({
     if (!matchingVariant) return;
     const qty = Math.max(1, singleQty);
     if (onSelectSingle) {
-      onSelectSingle(matchingVariant);
+      onSelectSingle(matchingVariant, qty);
     } else {
       onConfirm([{ variant: matchingVariant, qty }]);
     }

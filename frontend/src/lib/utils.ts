@@ -7,9 +7,14 @@ export function cn(...inputs: (string | undefined | null | false | boolean)[]): 
 
 export function parseAttributes(raw?: Record<string, string> | string): Record<string, string> {
   if (!raw) return {};
-  if (typeof raw === "object") return raw;
+  if (typeof raw === "object" && !Array.isArray(raw)) return raw;
+  if (typeof raw !== "string") return {};
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed;
+    }
+    return {};
   } catch {
     return {};
   }
