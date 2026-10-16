@@ -398,6 +398,39 @@ func (s *Server) handleGetPartners(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, partners)
 }
 
+type CreatePartnerDTO struct {
+	Name        string            `json:"name"`
+	Phone       *string           `json:"phone,omitempty"`
+	Address     *string           `json:"address,omitempty"`
+	PartnerType model.PartnerType `json:"partner_type"`
+}
+
+func (s *Server) handleCreatePartner(w http.ResponseWriter, r *http.Request) {
+	var input CreatePartnerDTO
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if input.PartnerType == "" {
+		input.PartnerType = model.PartnerTypeSupplier
+	}
+	p := model.Partner{
+		Name:        input.Name,
+		Phone:       input.Phone,
+		Address:     input.Address,
+		PartnerType: input.PartnerType,
+	}
+	if err := s.db.Create(&p).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, p)
+}
+
 // ----------------------------------------------------------------------------
 // Inventory Handlers
 // ----------------------------------------------------------------------------

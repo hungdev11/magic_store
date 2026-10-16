@@ -47,6 +47,7 @@ func NewServer(
 
 	// Partners
 	mux.HandleFunc("GET /api/partners", s.handleGetPartners)
+	mux.HandleFunc("POST /api/partners", s.handleCreatePartner)
 
 	// Inventory
 	mux.HandleFunc("POST /api/inventory/purchase", s.handlePurchaseReceiving)

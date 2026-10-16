@@ -240,9 +240,19 @@ export const api = {
     const query = type ? `?type=${type}` : "";
     return request<Partner[]>(`/partners${query}`);
   },
+  createPartner: (data: Partial<Partner>) =>
+    request<Partner>("/partners", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   // Inventory
   createPurchase: (data: PurchaseInput) =>
+    request<{ message: string }>("/inventory/purchase", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  purchaseStock: (data: PurchaseInput) =>
     request<{ message: string }>("/inventory/purchase", {
       method: "POST",
       body: JSON.stringify(data),
