@@ -39,11 +39,13 @@ export interface ProductVariant {
   sku: string;
   barcode?: string;
   variant_name?: string;
-  attributes?: Record<string, string>;
+  attributes?: Record<string, string> | string;
   cost_price: number | string;
   base_selling_price: number | string;
   min_selling_price: number | string;
+  current_stock?: number | string;
   current_inventory?: number | string;
+  min_stock_alert?: number | string;
   uom_conversions?: UomConversion[];
 }
 
