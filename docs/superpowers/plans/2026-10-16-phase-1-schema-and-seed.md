@@ -63,18 +63,18 @@ git commit -m "chore: initialize project with prisma and typescript"
 - Create: `prisma/schema.prisma`
 
 **Interfaces:**
-- Consumes: Đặc tả `docs/superpowers/specs/2026-10-16-micro-erp-schema-design.md`
-- Produces: Mô hình CSDL chuẩn gồm 14 Enums và 15 Models:
+- Consumes: Đặc tả `docs/superpowers/specs/2026-10-16-micro-erp-schema-design.md` và yêu cầu bổ sung cấu hình Topping/Modifier
+- Produces: Mô hình CSDL chuẩn gồm 14 Enums và 18 Models:
   - Enums: `CostingMethod`, `ProductType`, `ProductionMode`, `MovementType`, `RecipeType`, `ProductionStatus`, `PosSessionStatus`, `OrderStatus`, `PaymentMethod`, `PartnerType`, `DebtTransactionType`, `CashbookType`, `CashbookCategory`, `CashbookPaymentMethod`.
-  - Models: `StoreSetting`, `Category`, `Product`, `ProductVariant`, `UomConversion`, `InventoryBatch`, `InventoryMovement`, `BomRecipe`, `BomItem`, `ProductionOrder`, `Partner`, `SalesOrder`, `SalesOrderItem`, `PosSession`, `DebtLedger`, `CashbookTransaction`.
+  - Models: `StoreSetting`, `Category`, `Product`, `ProductVariant`, `UomConversion`, `ModifierGroup`, `ModifierItem`, `ProductModifierGroup`, `InventoryBatch`, `InventoryMovement`, `BomRecipe`, `BomItem`, `ProductionOrder`, `Partner`, `SalesOrder`, `SalesOrderItem`, `PosSession`, `DebtLedger`, `CashbookTransaction`.
 
 - [ ] **Step 1: Định nghĩa datasource, generator và 14 Enums**
 
 Khai báo generator `prisma-client-js`, datasource `postgresql`, và đầy đủ 14 Enums phục vụ cấu hình, trạng thái kho, BOM, đơn hàng, sổ nợ và dòng tiền.
 
-- [ ] **Step 2: Định nghĩa các Model Danh mục & Sản phẩm đa hình**
+- [ ] **Step 2: Định nghĩa các Model Danh mục, Sản phẩm đa hình & Topping/Modifiers**
 
-Viết các model `StoreSetting`, `Category`, `Product`, `ProductVariant`, `UomConversion` với đầy đủ quan hệ, cờ hành vi và kiểu Decimal(12,4), Decimal(15,2), JsonB.
+Viết các model `StoreSetting`, `Category`, `Product`, `ProductVariant`, `UomConversion`, `ModifierGroup`, `ModifierItem`, `ProductModifierGroup` với đầy đủ quan hệ, cờ hành vi và kiểu Decimal(12,4), Decimal(15,2), JsonB.
 
 - [ ] **Step 3: Định nghĩa các Model Quản lý Kho, Lô & Sổ cái bất biến**
 
@@ -139,14 +139,18 @@ Thiết lập kết nối Prisma, đọc biến môi trường `STORE_PROFILE`, 
   - Đơn đổi trả 1 chạm tại POS: Trả Áo Trắng Size M (`+1` cái kho, `is_return: true`), lấy Áo Đen Size L (`-1` cái kho), bù trừ tiền chênh lệch.
   - Ghi nhận nợ khách hàng vào `DebtLedger` và số dư `current_debt_balance`.
 
-- [ ] **Step 4: Viết kịch bản Seed 3 - Tiệm chế biến đồ ăn "Bếp Bánh Mì & Giò Chả Sài Gòn"**
+- [ ] **Step 4: Viết kịch bản Seed 3 - Tiệm chế biến đồ ăn & F&B "Bếp Bánh Mì & Giò Chả Sài Gòn"**
 
-- Cấu hình: `StoreSetting` bật `bom_production`, `batch_expiry`.
-- Sản phẩm: Nguyên liệu (Thịt heo nạc, Mỡ heo, Lá chuối, Vỏ bánh mì, Pate) & Thành phẩm (Chả lụa đòn 500g, Bánh mì thập cẩm).
+- Cấu hình: `StoreSetting` bật `bom_production`, `batch_expiry`, `product_modifiers`.
+- Cấu hình Topping/Modifier linh hoạt:
+  - Tạo nhóm ModifierGroup "Đồ ăn kèm Bánh Mì" (cho phép chọn nhiều topping).
+  - ModifierItem: "Thêm Trứng Ốp La" (+10.000đ, linked_variant: Trứng gà, deduct_qty: 1 quả), "Thêm Pate" (+5.000đ, linked_variant: Pate, deduct_qty: 20g), "Thêm Chả Lụa" (+8.000đ, linked_variant: Chả lụa, deduct_qty: 30g).
+  - Gắn nhóm Modifier vào món Bánh Mì Thập Cẩm qua `ProductModifierGroup`.
+- Sản phẩm: Nguyên liệu (Thịt heo nạc, Mỡ heo, Lá chuối, Vỏ bánh mì, Pate, Trứng gà) & Thành phẩm (Chả lụa đòn 500g, Bánh mì thập cẩm).
 - Dữ liệu giao dịch:
   - Công thức định mức BOM `ASSEMBLY` cho Chả Lụa và Bánh Mì Thập Cẩm.
   - Lệnh sản xuất theo mẻ `ProductionOrder`: Chế biến mẻ 50 đòn chả lụa.
-  - Đơn bán POS chế độ Backflush: Bán 2 Bánh mì thập cẩm tự động trừ ngầm nguyên liệu.
+  - Đơn bán POS chế độ Backflush có chọn Topping: Bán 1 Bánh mì thập cẩm có chọn Modifier "Thêm Trứng Ốp La" và "Thêm Pate", tự động tính thêm tiền và trừ kho nguyên liệu ăn kèm.
   - Ghi nhận hủy hao hụt `WASTAGE_SPOILAGE`: Hủy 5 ổ bánh mì hỏng kèm chi phí vào sổ quỹ `CashbookTransaction`.
 
 - [ ] **Step 5: Kiểm tra biên dịch TypeScript cho seed.ts**
