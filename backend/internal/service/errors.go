@@ -9,4 +9,7 @@ var (
 	ErrConversionNotFound          = errors.New("uom conversion not found")
 	ErrInvalidConversionFactor     = errors.New("conversion factor cannot be zero")
 	ErrBatchNotFound               = errors.New("inventory batch not found")
+	ErrRecipeNotFound              = errors.New("bom recipe not found")
+	ErrInvalidYieldQty             = errors.New("yield quantity must be positive")
+	ErrInvalidInputQty             = errors.New("input quantity must be positive")
 )
