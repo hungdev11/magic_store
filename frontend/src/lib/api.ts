@@ -19,9 +19,21 @@ export interface UpdateSettingsInput {
   enabled_modules?: string | Record<string, boolean>;
 }
 
+export interface Unit {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
 export interface Category {
   id: string;
   name: string;
+  code?: string;
+  is_active?: boolean;
+  parent_id?: string | null;
 }
 
 export interface UomConversion {
@@ -97,6 +109,36 @@ export interface Partner {
   current_debt_balance?: number | string;
   price_tier?: string;
   credit_limit?: number | string;
+  is_active?: boolean;
+}
+
+export interface BatchItem {
+  id: string;
+  variant_id: string;
+  variant?: ProductVariant;
+  batch_code: string;
+  supplier_id?: string;
+  supplier?: Partner;
+  received_date: string;
+  expiry_date?: string;
+  initial_qty: number | string;
+  remaining_qty: number | string;
+  unit_cost: number | string;
+  notes?: string;
+}
+
+export interface InventoryMovementItem {
+  id: string;
+  variant_id: string;
+  batch_id?: string;
+  movement_type: string;
+  qty_in_base_uom: number | string;
+  input_uom: string;
+  input_qty: number | string;
+  unit_cost_at_time: number | string;
+  reference_id?: string;
+  reason_note?: string;
+  created_at: string;
 }
 
 export interface PurchaseItem {
@@ -297,12 +339,41 @@ export const api = {
       body: JSON.stringify({ preset }),
     }),
 
+  // Units
+  getUnits: (activeOnly?: boolean) => {
+    const query = activeOnly ? "?active_only=true" : "";
+    return request<Unit[]>(`/units${query}`);
+  },
+  createUnit: (data: Partial<Unit> | { code: string; name: string; description?: string; is_active?: boolean }) =>
+    request<Unit>("/units", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateUnit: (id: string, data: Partial<Unit>) =>
+    request<Unit>(`/units/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteUnit: (id: string) =>
+    request<{ message: string }>(`/units/${id}`, {
+      method: "DELETE",
+    }),
+
   // Categories & Products
   getCategories: () => request<Category[]>("/categories"),
-  createCategory: (data: { name: string }) =>
+  createCategory: (data: { name: string; code?: string; is_active?: boolean; parent_id?: string | null }) =>
     request<Category>("/categories", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+  updateCategory: (id: string, data: Partial<Category>) =>
+    request<Category>(`/categories/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteCategory: (id: string) =>
+    request<{ message: string }>(`/categories/${id}`, {
+      method: "DELETE",
     }),
   getProducts: () => request<Product[]>("/products"),
   createProduct: (data: CreateProductInput) =>
@@ -319,6 +390,31 @@ export const api = {
   createPartner: (data: Partial<Partner>) =>
     request<Partner>("/partners", {
       method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updatePartner: (id: string, data: Partial<Partner>) =>
+    request<Partner>(`/partners/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deletePartner: (id: string) =>
+    request<{ message: string }>(`/partners/${id}`, {
+      method: "DELETE",
+    }),
+
+  // Batches & Traceability
+  getBatches: (params?: { q?: string; status?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.q) sp.append("q", params.q);
+    if (params?.status) sp.append("status", params.status);
+    const qs = sp.toString();
+    return request<BatchItem[]>(`/batches${qs ? `?${qs}` : ""}`);
+  },
+  getBatchTrace: (id: string) =>
+    request<InventoryMovementItem[]>(`/batches/${id}/trace`),
+  updateBatch: (id: string, data: Partial<BatchItem> | { notes?: string; expiry_date?: string | null }) =>
+    request<BatchItem>(`/batches/${id}`, {
+      method: "PUT",
       body: JSON.stringify(data),
     }),
 
