@@ -93,7 +93,10 @@ export interface Partner {
   phone?: string;
   address?: string;
   partner_type: "CUSTOMER" | "SUPPLIER" | "BOTH";
-  current_debt: number | string;
+  current_debt?: number | string;
+  current_debt_balance?: number | string;
+  price_tier?: string;
+  credit_limit?: number | string;
 }
 
 export interface PurchaseItem {

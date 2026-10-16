@@ -123,7 +123,7 @@ func (s *Server) handlePresetSettings(w http.ResponseWriter, r *http.Request) {
 	var modules string
 	switch strings.ToUpper(input.Preset) {
 	case "SEAFOOD":
-		modules = `{"catch_weight":true,"batch_expiry":true,"dynamic_pos_pricing":true}`
+		modules = `{"catch_weight":true,"batch_expiry":true,"bom_production":true,"dynamic_pos_pricing":true}`
 	case "APPAREL":
 		modules = `{"matrix_variants":true,"credit_ledger":true}`
 	case "FOOD":
@@ -191,7 +191,7 @@ func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetProducts(w http.ResponseWriter, r *http.Request) {
 	var products []model.Product
-	if err := s.db.Preload("Variants.UomConversions").Preload("Variants").Preload("Category").Find(&products).Error; err != nil {
+	if err := s.db.Preload("Variants.Batches", "remaining_qty > 0").Preload("Variants.UomConversions").Preload("Variants").Preload("Category").Find(&products).Error; err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

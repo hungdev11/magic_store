@@ -241,13 +241,6 @@ export default function SettingsPage() {
       // 1. Call store applyPreset API
       await applyPreset(presetKey);
 
-      // 2. Persist full preset flag matrix to backend
-      await updateSettings({
-        name: storeName || storeSetting?.name || "Cửa Hàng",
-        costing_method: costingMethod,
-        enabled_modules: preset.modules,
-      });
-
       // Update local state immediately
       setLocalModules(preset.modules);
       setToast({
