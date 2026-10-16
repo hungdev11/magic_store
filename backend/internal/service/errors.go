@@ -8,4 +8,5 @@ var (
 	ErrVariantNotFound             = errors.New("product variant not found")
 	ErrConversionNotFound          = errors.New("uom conversion not found")
 	ErrInvalidConversionFactor     = errors.New("conversion factor cannot be zero")
+	ErrBatchNotFound               = errors.New("inventory batch not found")
 )
