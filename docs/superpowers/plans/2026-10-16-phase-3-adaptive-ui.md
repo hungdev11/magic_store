@@ -64,12 +64,16 @@ git commit -m "feat(backend): implement rest api server and handlers for invento
 
 ---
 
-### Task 2: Khởi tạo Frontend Next.js 15 & Cấu trúc Store Profile
+### Task 2: Khởi tạo Frontend Next.js 15 & Hệ thống Impeccable Design Tokens
 
 **Files:**
 - Create: `frontend/package.json`
 - Create: `frontend/tsconfig.json`
 - Create: `frontend/next.config.ts`
+- Create: `frontend/tailwind.config.ts`
+- Create: `frontend/src/styles/tokens.css`
+- Create: `frontend/src/styles/globals.css`
+- Create: `frontend/src/lib/design-tokens.ts`
 - Create: `frontend/src/lib/api.ts`
 - Create: `frontend/src/lib/store.ts`
 - Create: `frontend/src/components/Sidebar.tsx`
@@ -79,30 +83,46 @@ git commit -m "feat(backend): implement rest api server and handlers for invento
 
 **Interfaces:**
 - Consumes: REST API từ backend
-- Produces: Khung ứng dụng Next.js với Sidebar tự ẩn/hiện menu theo `enabled_modules`, Zustand store `useStoreProfile`.
+- Produces: Hệ thống Impeccable Design Tokens (CSS Variables + Tailwind semantic mappings + TypeScript token helpers), khung ứng dụng Next.js với Sidebar thích ứng động theo `enabled_modules`, Zustand store `useStoreProfile`.
 
 - [ ] **Step 1: Khởi tạo frontend package.json và cài đặt dependencies**
 
 Cài đặt `next`, `react`, `react-dom`, `lucide-react`, `zustand`, `tailwindcss`, `@types/node`, `@types/react`.
 
-- [ ] **Step 2: Cài đặt API Client và Zustand Store**
+- [ ] **Step 2: Thiết lập Impeccable Design Token System**
+
+Xây dựng:
+1. `frontend/src/styles/tokens.css`: Hệ thống biến màu `:root` chuẩn Micro-ERP:
+   - Surface & Bảng nền: `--surface-app`, `--surface-card`, `--surface-muted`, `--border-subtle`, `--border-default`, `--border-focus`.
+   - Text & Kiểu chữ: `--text-main`, `--text-sub`, `--text-disabled`, `--text-inverse`.
+   - ERP Semantic Statuses:
+     - Primary/Brand: `--color-brand` (Emerald/Slate chuyên nghiệp).
+     - Success / Doanh thu / Nhập kho: `--color-inflow` (Emerald 600).
+     - Danger / Chi phí / Hủy hao hụt / Nợ xấu: `--color-outflow` (Rose 600).
+     - Warning / Cảnh báo giá sàn / Tồn kho tối thiểu: `--color-alert` (Amber 500).
+     - Industry Accents: `--accent-catchweight` (Cyan), `--accent-matrix` (Violet), `--accent-bom` (Indigo).
+   - Radius & Shadows: `--radius-base`, `--radius-lg`, `--shadow-card`, `--shadow-popover`.
+2. `frontend/tailwind.config.ts`: Ánh xạ toàn bộ tokens vào Tailwind palette.
+3. `frontend/src/lib/design-tokens.ts`: Export kiểu `BadgeVariant`, hàm định dạng tài chính `formatVND(amount)`, định dạng số cân `formatQty(qty, uom)`.
+
+- [ ] **Step 3: Cài đặt API Client và Zustand Store Profile**
 
 Tạo `frontend/src/lib/api.ts` và `frontend/src/lib/store.ts` hỗ trợ tải và đồng bộ `enabled_modules`.
 
-- [ ] **Step 3: Xây dựng Layout & Sidebar Thích ứng**
+- [ ] **Step 4: Xây dựng Layout & Sidebar Thích ứng**
 
-Tạo `Sidebar.tsx` tự động ẩn/hiện mục "Chế biến & Định mức" khi tắt `bom_production`, ẩn "Sổ nợ" khi tắt `credit_ledger`.
+Tạo `Sidebar.tsx` và `Header.tsx` tự động ẩn/hiện mục "Chế biến & Định mức" khi tắt `bom_production`, ẩn "Sổ nợ" khi tắt `credit_ledger`.
 
-- [ ] **Step 4: Kiểm tra build TypeScript**
+- [ ] **Step 5: Kiểm tra build TypeScript**
 
 Chạy: `cd frontend && npm run build`
 Kỳ vọng: Build thành công.
 
-- [ ] **Step 5: Commit Task 2**
+- [ ] **Step 6: Commit Task 2**
 
 ```bash
 git add frontend/
-git commit -m "feat(frontend): initialize next.js 15 app with adaptive zustand store and layout"
+git commit -m "feat(frontend): initialize next.js 15 with impeccable design tokens and adaptive layout"
 ```
 
 ---
