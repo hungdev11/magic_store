@@ -238,13 +238,15 @@ func (s *Server) handleUpdateUnit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if input.Code != "" {
-		unit.Code = strings.ToUpper(strings.TrimSpace(input.Code))
+	if trimmedCode := strings.ToUpper(strings.TrimSpace(input.Code)); trimmedCode != "" {
+		unit.Code = trimmedCode
 	}
-	if input.Name != "" {
-		unit.Name = strings.TrimSpace(input.Name)
+	if trimmedName := strings.TrimSpace(input.Name); trimmedName != "" {
+		unit.Name = trimmedName
 	}
-	unit.Description = strings.TrimSpace(input.Description)
+	if input.Description != "" {
+		unit.Description = strings.TrimSpace(input.Description)
+	}
 	if input.IsActive != nil {
 		unit.IsActive = *input.IsActive
 	}
@@ -275,10 +277,16 @@ func (s *Server) handleDeleteUnit(w http.ResponseWriter, r *http.Request) {
 
 	// ponytail: manual referential check on code; upgrade to schema FK constraints when DB migration strategy stabilizes.
 	var prodCount int64
-	s.db.Model(&model.Product{}).Where("base_uom = ?", unit.Code).Count(&prodCount)
+	if err := s.db.Model(&model.Product{}).Where("base_uom = ?", unit.Code).Count(&prodCount).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	var convCount int64
-	s.db.Model(&model.UomConversion{}).Where("uom_name = ?", unit.Code).Count(&convCount)
+	if err := s.db.Model(&model.UomConversion{}).Where("uom_name = ?", unit.Code).Count(&convCount).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	if prodCount > 0 || convCount > 0 {
 		writeError(w, http.StatusConflict, "Đơn vị đang được sử dụng ở sản phẩm hoặc bảng quy đổi, không thể xóa.")
