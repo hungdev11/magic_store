@@ -39,6 +39,12 @@ func NewServer(
 	mux.HandleFunc("PUT /api/settings", s.handleUpdateSettings)
 	mux.HandleFunc("POST /api/settings/preset", s.handlePresetSettings)
 
+	// Units
+	mux.HandleFunc("GET /api/units", s.handleGetUnits)
+	mux.HandleFunc("POST /api/units", s.handleCreateUnit)
+	mux.HandleFunc("PUT /api/units/{id}", s.handleUpdateUnit)
+	mux.HandleFunc("DELETE /api/units/{id}", s.handleDeleteUnit)
+
 	// Catalog & Products
 	mux.HandleFunc("GET /api/categories", s.handleGetCategories)
 	mux.HandleFunc("POST /api/categories", s.handleCreateCategory)

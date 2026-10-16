@@ -157,6 +157,142 @@ func (s *Server) handlePresetSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------------------------------------------------------------------
+// Unit Handlers
+// ----------------------------------------------------------------------------
+
+type unitInput struct {
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	IsActive    *bool  `json:"is_active"`
+}
+
+func (s *Server) handleGetUnits(w http.ResponseWriter, r *http.Request) {
+	query := s.db.Model(&model.Unit{})
+	if r.URL.Query().Get("active_only") == "true" || r.URL.Query().Get("active_only") == "1" {
+		query = query.Where("is_active = ?", true)
+	}
+
+	var units []model.Unit
+	if err := query.Order("code asc").Find(&units).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, units)
+}
+
+func (s *Server) handleCreateUnit(w http.ResponseWriter, r *http.Request) {
+	var input unitInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	code := strings.ToUpper(strings.TrimSpace(input.Code))
+	name := strings.TrimSpace(input.Name)
+	if code == "" || name == "" {
+		writeError(w, http.StatusBadRequest, "code and name are required")
+		return
+	}
+
+	isActive := true
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+
+	unit := model.Unit{
+		ID:          uuid.New().String(),
+		Code:        code,
+		Name:        name,
+		Description: strings.TrimSpace(input.Description),
+		IsActive:    isActive,
+	}
+
+	if err := s.db.Create(&unit).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, unit)
+}
+
+func (s *Server) handleUpdateUnit(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "unit id is required")
+		return
+	}
+
+	var unit model.Unit
+	if err := s.db.First(&unit, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(w, http.StatusNotFound, "unit not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	var input unitInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if input.Code != "" {
+		unit.Code = strings.ToUpper(strings.TrimSpace(input.Code))
+	}
+	if input.Name != "" {
+		unit.Name = strings.TrimSpace(input.Name)
+	}
+	unit.Description = strings.TrimSpace(input.Description)
+	if input.IsActive != nil {
+		unit.IsActive = *input.IsActive
+	}
+
+	if err := s.db.Save(&unit).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, unit)
+}
+
+func (s *Server) handleDeleteUnit(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "unit id is required")
+		return
+	}
+
+	var unit model.Unit
+	if err := s.db.First(&unit, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(w, http.StatusNotFound, "unit not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	// ponytail: manual referential check on code; upgrade to schema FK constraints when DB migration strategy stabilizes.
+	var prodCount int64
+	s.db.Model(&model.Product{}).Where("base_uom = ?", unit.Code).Count(&prodCount)
+
+	var convCount int64
+	s.db.Model(&model.UomConversion{}).Where("uom_name = ?", unit.Code).Count(&convCount)
+
+	if prodCount > 0 || convCount > 0 {
+		writeError(w, http.StatusConflict, "Đơn vị đang được sử dụng ở sản phẩm hoặc bảng quy đổi, không thể xóa.")
+		return
+	}
+
+	if err := s.db.Delete(&unit).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+// ----------------------------------------------------------------------------
 // Category Handlers
 // ----------------------------------------------------------------------------
 
