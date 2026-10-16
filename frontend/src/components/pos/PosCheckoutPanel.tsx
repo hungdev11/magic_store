@@ -11,12 +11,10 @@ import {
   RefreshCw,
   Check,
   Calculator,
-  ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 import { type Partner } from "@/lib/api";
 import { formatVND } from "@/lib/design-tokens";
-import { Badge, Button } from "@/components/common";
+import { Badge } from "@/components/common";
 
 export type PosPaymentMethod = "CASH" | "BANK_QR" | "MIXED" | "CREDIT";
 

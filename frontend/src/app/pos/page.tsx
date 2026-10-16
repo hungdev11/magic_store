@@ -30,16 +30,12 @@ import {
   type MatrixSelectionItem,
 } from "@/components/pos";
 import { Modal } from "@/components/common";
-
-function parseAttributes(raw?: Record<string, string> | string): Record<string, string> {
-  if (!raw) return {};
-  if (typeof raw === "object") return raw;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
+import {
+  parseAttributes,
+  isWeighableProduct,
+  isMatrixProduct,
+  isModifierProduct,
+} from "@/lib/utils";
 
 // ponytail: thin orchestrator coordinating modular POS sub-components; upgrade to service-worker background sync if PWA installability required.
 export default function PosPage() {
@@ -161,33 +157,6 @@ export default function PosPage() {
     searchInputRef.current?.focus();
   }, []);
 
-  // Product Inspection Helpers
-  const isWeighableProduct = useCallback((p: Product) => {
-    return (
-      p.is_weighable ||
-      p.variants?.some((v) =>
-        v.uom_conversions?.some((c) => c.is_variable_ratio)
-      ) ||
-      false
-    );
-  }, []);
-
-  const isMatrixProduct = useCallback((p: Product) => {
-    if (!p.variants) return false;
-    if (p.variants.length > 1) return true;
-    const firstAttrs = p.variants[0]?.attributes;
-    return Boolean(firstAttrs && Object.keys(parseAttributes(firstAttrs)).length > 0);
-  }, []);
-
-  const isModifierProduct = useCallback((p: Product) => {
-    return (
-      p.production_mode === "POS_BACKFLUSH" ||
-      p.production_mode === "ASSEMBLY" ||
-      p.product_type === "COMBO" ||
-      Boolean((p as any).modifier_groups && (p as any).modifier_groups.length > 0)
-    );
-  }, []);
-
   // Card Click Interaction
   const handleProductCardClick = useCallback((product: Product) => {
     const primaryVariant = product.variants?.[0];
@@ -203,7 +172,7 @@ export default function PosPage() {
       // Standard Product: 1-touch immediate add
       addItem(primaryVariant, product);
     }
-  }, [addItem, isMatrixProduct, isWeighableProduct, isModifierProduct]);
+  }, [addItem]);
 
   // Checkout Execution
   const handleTriggerCheckout = useCallback(async () => {

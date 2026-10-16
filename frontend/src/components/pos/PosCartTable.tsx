@@ -56,7 +56,7 @@ export const PosCartTable: React.FC<PosCartTableProps> = ({
       <div className="px-3 py-1.5 bg-surface-muted/40 border-b border-border-subtle flex items-center justify-between text-xs shrink-0">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-text-main">Chi tiết giỏ hàng</span>
-          <span className="px-1.5 py-0.2 rounded-sm bg-surface-app border border-border-subtle font-mono text-[11px] font-bold text-text-sub tabular-nums">
+          <span className="px-1.5 py-[1px] rounded-sm bg-surface-app border border-border-subtle font-mono text-[11px] font-bold text-text-sub tabular-nums">
             {items.length} mặt hàng
           </span>
         </div>

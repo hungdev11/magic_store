@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { type Product, type ProductVariant } from "@/lib/api";
 import { formatVND, formatQty } from "@/lib/design-tokens";
+import { parseAttributes, getVariantStock } from "@/lib/utils";
 import { Modal, Button, Badge } from "@/components/common";
 import { Layers, Plus, Minus, ShoppingCart, Check } from "lucide-react";
 
@@ -17,22 +18,6 @@ export interface PosMatrixModalProps {
   product: Product;
   onConfirm: (selections: MatrixSelectionItem[]) => void;
   onSelectSingle?: (variant: ProductVariant) => void;
-}
-
-function parseAttributes(raw?: Record<string, string> | string): Record<string, string> {
-  if (!raw) return {};
-  if (typeof raw === "object") return raw;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
-function getVariantStock(v?: ProductVariant): number {
-  if (!v) return 0;
-  const val = v.current_stock ?? v.current_inventory ?? 0;
-  return Number(val) || 0;
 }
 
 // ponytail: interactive attribute rows selector; upgrade to dynamic facet hierarchy if cascading dependencies between attributes are required.

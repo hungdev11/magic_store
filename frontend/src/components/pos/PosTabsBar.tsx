@@ -66,7 +66,7 @@ export const PosTabsBar: React.FC<PosTabsBarProps> = ({
               <span className="truncate max-w-[100px]">{label}</span>
 
               {order.itemCount > 0 && (
-                <span className="px-1 py-0.2 rounded-sm bg-surface-muted text-text-sub font-mono text-[10px] font-medium tabular-nums">
+                <span className="px-1 py-[1px] rounded-sm bg-surface-muted text-text-sub font-mono text-[10px] font-medium tabular-nums">
                   {order.itemCount}
                 </span>
               )}
