@@ -52,7 +52,15 @@ func setupAPITestServer(t *testing.T) (*api.Server, *gorm.DB) {
 	uomSvc := service.NewUOMService(db)
 	ledgerSvc := service.NewInventoryLedgerService(db)
 	bomSvc := service.NewBOMProductionService(db, ledgerSvc)
-	srv := api.NewServer(db, uomSvc, ledgerSvc, bomSvc)
+	storageSvc, _ := service.NewStorageService(service.StorageConfig{
+		Endpoint:   "localhost:9000",
+		AccessKey:  "minioadmin",
+		SecretKey:  "minioadmin",
+		BucketName: "products",
+		UseSSL:     false,
+		PublicURL:  "http://localhost:9000",
+	})
+	srv := api.NewServer(db, uomSvc, ledgerSvc, bomSvc, storageSvc)
 
 	return srv, db
 }

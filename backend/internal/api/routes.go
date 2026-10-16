@@ -10,11 +10,12 @@ import (
 
 // Server coordinates domain services and handles HTTP routing for the ERP backend.
 type Server struct {
-	db            *gorm.DB
-	uomService    *service.UOMService
-	ledgerService *service.InventoryLedgerService
-	bomService    *service.BOMProductionService
-	router        http.Handler
+	db             *gorm.DB
+	uomService     *service.UOMService
+	ledgerService  *service.InventoryLedgerService
+	bomService     *service.BOMProductionService
+	storageService *service.StorageService
+	router         http.Handler
 }
 
 // NewServer initializes router, routes, CORS middleware, and domain services.
@@ -24,12 +25,14 @@ func NewServer(
 	uomSvc *service.UOMService,
 	ledgerSvc *service.InventoryLedgerService,
 	bomSvc *service.BOMProductionService,
+	storageSvc *service.StorageService,
 ) *Server {
 	s := &Server{
-		db:            db,
-		uomService:    uomSvc,
-		ledgerService: ledgerSvc,
-		bomService:    bomSvc,
+		db:             db,
+		uomService:     uomSvc,
+		ledgerService:  ledgerSvc,
+		bomService:     bomSvc,
+		storageService: storageSvc,
 	}
 
 	mux := http.NewServeMux()
@@ -76,6 +79,9 @@ func NewServer(
 
 	// POS Terminal
 	mux.HandleFunc("POST /api/pos/checkout", s.handlePosCheckout)
+
+	// Object Storage Uploads
+	mux.HandleFunc("POST /api/upload/presigned-url", s.handleGetPresignedUploadURL)
 
 	s.router = corsMiddleware(mux)
 	return s

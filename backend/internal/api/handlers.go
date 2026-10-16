@@ -1602,3 +1602,38 @@ func (s *Server) handleUpdateBatch(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, batch)
 }
+
+// ----------------------------------------------------------------------------
+// Storage & Presigned Upload Handlers
+// ----------------------------------------------------------------------------
+
+type PresignedUploadRequest struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+}
+
+func (s *Server) handleGetPresignedUploadURL(w http.ResponseWriter, r *http.Request) {
+	if s.storageService == nil {
+		writeError(w, http.StatusServiceUnavailable, "dịch vụ lưu trữ chưa được khởi tạo")
+		return
+	}
+
+	var req PresignedUploadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "JSON không hợp lệ")
+		return
+	}
+
+	res, err := s.storageService.GetPresignedUploadURL(r.Context(), req.Filename, req.ContentType)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidContentType) || errors.Is(err, service.ErrMissingFilename) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, res)
+}
+

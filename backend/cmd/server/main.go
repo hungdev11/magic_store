@@ -63,7 +63,40 @@ func main() {
 	ledgerSvc := service.NewInventoryLedgerService(db)
 	bomSvc := service.NewBOMProductionService(db, ledgerSvc)
 
-	srv := api.NewServer(db, uomSvc, ledgerSvc, bomSvc)
+	minioEndpoint := os.Getenv("MINIO_ENDPOINT")
+	if minioEndpoint == "" {
+		minioEndpoint = "localhost:9000"
+	}
+	minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
+	if minioAccessKey == "" {
+		minioAccessKey = "minioadmin"
+	}
+	minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
+	if minioSecretKey == "" {
+		minioSecretKey = "minioadmin"
+	}
+	minioBucket := os.Getenv("MINIO_BUCKET")
+	if minioBucket == "" {
+		minioBucket = "products"
+	}
+	minioPublicURL := os.Getenv("MINIO_PUBLIC_URL")
+	if minioPublicURL == "" {
+		minioPublicURL = fmt.Sprintf("http://%s", minioEndpoint)
+	}
+
+	storageSvc, err := service.NewStorageService(service.StorageConfig{
+		Endpoint:   minioEndpoint,
+		AccessKey:  minioAccessKey,
+		SecretKey:  minioSecretKey,
+		BucketName: minioBucket,
+		UseSSL:     os.Getenv("MINIO_USE_SSL") == "true",
+		PublicURL:  minioPublicURL,
+	})
+	if err != nil {
+		log.Printf("warning: minio storage service failed to initialize: %v", err)
+	}
+
+	srv := api.NewServer(db, uomSvc, ledgerSvc, bomSvc, storageSvc)
 
 	port := os.Getenv("PORT")
 	if port == "" {
