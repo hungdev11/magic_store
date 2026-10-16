@@ -137,6 +137,17 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	db.Create(cBeerCarton)
 	db.Create(cFishPiece)
 
+	beefTrayPrice := decimal.NewFromInt(110000)
+	cBeefTray := &model.UomConversion{
+		ID:                 "c_beef_tray",
+		VariantID:          vBeef.ID,
+		UomName:            "Khay",
+		ConversionFactor:   decimal.NewFromFloat(0.5),
+		IsVariableRatio:    false,
+		DefaultPriceForUom: &beefTrayPrice,
+	}
+	db.Create(cBeefTray)
+
 	return db
 }
 
@@ -399,5 +410,59 @@ func TestUOMService_CalculateLinePrice(t *testing.T) {
 	})
 	if !errors.Is(err, service.ErrConversionNotFound) {
 		t.Fatalf("expected ErrConversionNotFound, got %v", err)
+	}
+}
+
+func TestUOMService_WeighableProductFixedSecondaryUOM(t *testing.T) {
+	db := setupTestDB(t)
+	svc := service.NewUOMService(db)
+	ctx := context.Background()
+
+	// Pre-packaged 0.5kg beef tray sold at 110,000 VND/tray, 2 trays -> line total = 220,000 VND, actual deducted = 1.0 kg
+	res, err := svc.CalculateLinePrice(ctx, nil, service.CalculateLinePriceParams{
+		VariantID: "v_beef",
+		SoldUOM:   "Khay",
+		SoldQty:   decimal.NewFromInt(2),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.UnitPrice.Equal(decimal.NewFromInt(110000)) {
+		t.Fatalf("expected unit price 110000, got %s", res.UnitPrice.String())
+	}
+	if !res.LineTotal.Equal(decimal.NewFromInt(220000)) {
+		t.Fatalf("expected line total 220000, got %s", res.LineTotal.String())
+	}
+	if !res.ActualDeductedQty.Equal(decimal.NewFromFloat(1.0)) {
+		t.Fatalf("expected deducted qty 1.0, got %s", res.ActualDeductedQty.String())
+	}
+	if res.IsPriceOverridden {
+		t.Fatalf("expected IsPriceOverridden false")
+	}
+}
+
+func TestUOMService_ZeroConversionFactor(t *testing.T) {
+	db := setupTestDB(t)
+	svc := service.NewUOMService(db)
+	ctx := context.Background()
+
+	cZero := &model.UomConversion{
+		ID:               "c_beer_zero",
+		VariantID:        "v_beer",
+		UomName:          "ZeroBox",
+		ConversionFactor: decimal.Zero,
+		IsVariableRatio:  false,
+	}
+	if err := db.Create(cZero).Error; err != nil {
+		t.Fatalf("failed to insert zero conversion: %v", err)
+	}
+
+	_, err := svc.FromBaseQty(ctx, nil, service.FromBaseQtyParams{
+		VariantID: "v_beer",
+		TargetUOM: "ZeroBox",
+		BaseQty:   decimal.NewFromInt(10),
+	})
+	if !errors.Is(err, service.ErrInvalidConversionFactor) {
+		t.Fatalf("expected ErrInvalidConversionFactor, got %v", err)
 	}
 }

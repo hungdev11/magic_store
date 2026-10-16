@@ -114,6 +114,10 @@ func (s *UOMService) FromBaseQty(ctx context.Context, tx *gorm.DB, params FromBa
 		return decimal.Zero, err
 	}
 
+	if conversion.ConversionFactor.IsZero() {
+		return decimal.Zero, ErrInvalidConversionFactor
+	}
+
 	return params.BaseQty.Div(conversion.ConversionFactor), nil
 }
 
@@ -143,7 +147,6 @@ func (s *UOMService) CalculateLinePrice(ctx context.Context, tx *gorm.DB, params
 	}
 
 	isVariableRatio := conversion != nil && conversion.IsVariableRatio
-	isWeighable := variant.Product.IsWeighable || isVariableRatio
 
 	var actualDeductedQty decimal.Decimal
 	if isVariableRatio {
@@ -195,7 +198,7 @@ func (s *UOMService) CalculateLinePrice(ctx context.Context, tx *gorm.DB, params
 	}
 
 	var lineTotal decimal.Decimal
-	if isWeighable {
+	if isVariableRatio || isBaseUom {
 		lineTotal = actualDeductedQty.Mul(unitPrice)
 	} else {
 		lineTotal = params.SoldQty.Mul(unitPrice)

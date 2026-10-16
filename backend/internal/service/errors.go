@@ -7,4 +7,5 @@ var (
 	ErrMinPriceViolation           = errors.New("price is below minimum selling price")
 	ErrVariantNotFound             = errors.New("product variant not found")
 	ErrConversionNotFound          = errors.New("uom conversion not found")
+	ErrInvalidConversionFactor     = errors.New("conversion factor cannot be zero")
 )
