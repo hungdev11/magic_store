@@ -182,6 +182,79 @@ export interface DisassemblyInput {
   notes?: string;
 }
 
+export interface PosCheckoutModifier {
+  name: string;
+  price: number;
+  linked_variant_id?: string;
+  deduct_qty?: number;
+}
+
+export interface PosCheckoutItemPayload {
+  variant_id: string;
+  sold_uom: string;
+  sold_qty: number;
+  actual_base_qty_deducted: number;
+  original_unit_price?: number;
+  actual_unit_price: number;
+  line_total: number;
+  is_return: boolean;
+  modifiers?: PosCheckoutModifier[];
+  modifiers_json?: string;
+  batch_id?: string;
+}
+
+export interface PosCheckoutPayload {
+  pos_session_id?: string;
+  customer_id?: string;
+  items: PosCheckoutItemPayload[];
+  subtotal: number;
+  discount_amount: number;
+  surcharge_amount: number;
+  total_amount: number;
+  paid_amount: number;
+  debt_amount: number;
+  payment_method: "CASH" | "BANK_QR" | "MIXED" | "CREDIT";
+  notes?: string;
+}
+
+export interface PosCheckoutResponseItem {
+  id: string;
+  order_id: string;
+  variant_id: string;
+  variant?: ProductVariant;
+  batch_id?: string;
+  sold_uom: string;
+  sold_qty: number | string;
+  actual_base_qty_deducted: number | string;
+  original_unit_price?: number | string;
+  actual_unit_price: number | string;
+  line_total: number | string;
+  modifiers_json?: string;
+  line_cogs?: number | string;
+  is_return: boolean;
+}
+
+export interface PosCheckoutResponse {
+  id: string;
+  order_number: string;
+  customer_id?: string;
+  customer?: Partner;
+  pos_session_id?: string;
+  status: string;
+  subtotal: number | string;
+  discount_amount: number | string;
+  surcharge_amount: number | string;
+  total_amount: number | string;
+  paid_amount: number | string;
+  debt_amount: number | string;
+  total_cogs?: number | string;
+  payment_method: string;
+  items?: PosCheckoutResponseItem[];
+  created_at: string;
+  updated_at?: string;
+  offline?: boolean;
+}
+
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
   const headers = {
@@ -283,5 +356,12 @@ export const api = {
     request<any>("/production/disassembly", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  // POS Terminal
+  checkoutOrder: (payload: PosCheckoutPayload) =>
+    request<PosCheckoutResponse>("/pos/checkout", {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 };
