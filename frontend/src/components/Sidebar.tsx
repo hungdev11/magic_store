@@ -14,6 +14,7 @@ import {
   Scale,
   Sparkles,
   Layers,
+  WalletCards,
 } from "lucide-react";
 
 interface NavItem {
@@ -56,13 +57,23 @@ export function Sidebar() {
     });
   }
 
-  // Wastage is available when batch_expiry is active or general inventory loss tracking
-  if (isModuleEnabled("batch_expiry") || true) {
+  // Wastage is available when batch_expiry is active or general loss tracking
+  if (isModuleEnabled("batch_expiry")) {
     navItems.push({
       name: "Hủy hàng & Hao hụt",
       href: "/inventory/wastage",
       icon: Trash2,
-      badge: isModuleEnabled("batch_expiry") ? "Lô/Hạn" : undefined,
+      badge: "Lô/Hạn",
+    });
+  }
+
+  // Credit ledger is available when credit_ledger is active
+  if (isModuleEnabled("credit_ledger")) {
+    navItems.push({
+      name: "Sổ nợ & Đối tác",
+      href: "/partners",
+      icon: WalletCards,
+      badge: "Công nợ",
     });
   }
 
