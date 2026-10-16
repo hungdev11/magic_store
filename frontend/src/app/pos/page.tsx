@@ -14,8 +14,13 @@ import {
   type Category,
   type Partner,
 } from "@/lib/api";
+import {
+  isWeighableProduct,
+  isMatrixProduct,
+  isModifierProduct,
+} from "@/lib/utils";
 import { formatVND } from "@/lib/design-tokens";
-import { CheckCircle2, RefreshCw } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import {
   PosHeader,
   PosTabsBar,
@@ -27,23 +32,19 @@ import {
   PosModifierModal,
   PosCustomerModal,
   PosPriceModal,
+  type PosWarehouse,
   type MatrixSelectionItem,
 } from "@/components/pos";
 import { Modal } from "@/components/common";
-import {
-  parseAttributes,
-  isWeighableProduct,
-  isMatrixProduct,
-  isModifierProduct,
-} from "@/lib/utils";
 
-// ponytail: thin orchestrator coordinating modular POS sub-components; upgrade to service-worker background sync if PWA installability required.
+// ponytail: orchestrator container coordinating modular POS sub-components; upgrade to persistent local order drafts if switching multi-register terminals.
 export default function PosPage() {
   const { storeSetting, fetchSettings } = useStoreProfile();
   const {
     cart,
     selectedCustomer,
     discountAmount,
+    surchargeAmount,
     paidAmount,
     paymentMethod,
     offlineQueue,
@@ -60,6 +61,7 @@ export default function PosPage() {
     clearCart,
     setCustomer,
     setDiscount,
+    setSurcharge,
     setPaidAmount,
     setPaymentMethod,
     setOnlineStatus,
@@ -71,6 +73,11 @@ export default function PosPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [customers, setCustomers] = useState<Partner[]>([]);
+  const [warehouses, setWarehouses] = useState<PosWarehouse[]>([
+    { id: "default", name: "Kho chính (Mặc định)" },
+  ]);
+  const [activeWarehouseId, setActiveWarehouseId] = useState<string>("default");
+  const [activeShift] = useState<string>("Ca 1 (Sáng)");
   const [isLoadingData, setIsLoadingData] = useState(true);
 
   // Search & Filter State
@@ -78,7 +85,10 @@ export default function PosPage() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("ALL");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Modals State
+  // Multi-order Tabs State
+  const [activeOrderId, setActiveOrderId] = useState<string>("order-1");
+
+  // Modal States
   const [activeWeighModal, setActiveWeighModal] = useState<{
     product: Product;
     variant: ProductVariant;
@@ -94,6 +104,7 @@ export default function PosPage() {
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [activePriceModal, setActivePriceModal] = useState<PosCartItem | null>(null);
 
+  // Checkout Result State
   const [checkoutSuccess, setCheckoutSuccess] = useState<{
     orderId: string;
     totalAmount: number;
@@ -104,13 +115,11 @@ export default function PosPage() {
     isOffline: boolean;
   } | null>(null);
 
+  // Network & Sync State
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
-
-  // Multi-order Tabs State
-  const [activeOrderId, setActiveOrderId] = useState<string>("order-1");
 
   // Initial Data Fetch
   useEffect(() => {
@@ -152,12 +161,12 @@ export default function PosPage() {
     };
   }, [setOnlineStatus]);
 
-  // Focus search input on initial mount
+  // Focus search input on mount
   useEffect(() => {
     searchInputRef.current?.focus();
   }, []);
 
-  // Card Click Interaction
+  // Action Handlers (Declared prior to shortcut listener to prevent TDZ/TS2448)
   const handleProductCardClick = useCallback((product: Product) => {
     const primaryVariant = product.variants?.[0];
     if (!primaryVariant) return;
@@ -169,14 +178,12 @@ export default function PosPage() {
     } else if (isModifierProduct(product)) {
       setActiveModifierModal({ product, variant: primaryVariant });
     } else {
-      // Standard Product: 1-touch immediate add
       addItem(primaryVariant, product);
     }
   }, [addItem]);
 
-  // Checkout Execution
   const handleTriggerCheckout = useCallback(async () => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || isCheckingOut) return;
     setCheckoutError(null);
 
     const debt = getDebtAmount();
@@ -188,7 +195,7 @@ export default function PosPage() {
 
     setIsCheckingOut(true);
     try {
-      const res = await checkout("Đơn bán hàng POS siêu tốc");
+      const res = await checkout("Đơn bán hàng POS");
       setCheckoutSuccess({
         orderId: res.order_number || res.id || "POS-OFFLINE",
         totalAmount: getTotalAmount(),
@@ -199,12 +206,13 @@ export default function PosPage() {
         isOffline: Boolean(res.offline),
       });
     } catch (err: any) {
-      setCheckoutError(err.message || "Lỗi xử lý thanh toán");
+      setCheckoutError(err?.message || "Lỗi xử lý thanh toán");
     } finally {
       setIsCheckingOut(false);
     }
   }, [
     cart.length,
+    isCheckingOut,
     getDebtAmount,
     selectedCustomer,
     checkout,
@@ -213,14 +221,13 @@ export default function PosPage() {
     getChangeAmount,
   ]);
 
-  // Sync Offline Queue
   const handleSyncOfflineQueue = useCallback(async () => {
     if (isSyncing || offlineQueue.length === 0) return;
     setIsSyncing(true);
     setSyncMessage(null);
     try {
       const syncedCount = await syncOfflineQueue();
-      setSyncMessage(`Đã đồng bộ thành công ${syncedCount} đơn hàng ngoại tuyến.`);
+      setSyncMessage(`Đã đồng bộ thành công ${syncedCount} đơn hàng.`);
       setTimeout(() => setSyncMessage(null), 4000);
     } catch (err: any) {
       setSyncMessage(err?.message || "Đồng bộ thất bại. Vui lòng thử lại.");
@@ -229,59 +236,12 @@ export default function PosPage() {
     }
   }, [isSyncing, offlineQueue.length, syncOfflineQueue]);
 
-  // Keyboard Shortcuts Handler: F2, F4, F8, F9, Esc
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "F2") {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      } else if (e.key === "F4") {
-        e.preventDefault();
-        setIsCustomerModalOpen((prev) => !prev);
-      } else if (e.key === "F8") {
-        e.preventDefault();
-        if (cart.length > 0 && !isCheckingOut) {
-          handleTriggerCheckout();
-        }
-      } else if (e.key === "F9") {
-        e.preventDefault();
-        if (cart.length > 0) {
-          const lastItem = cart[cart.length - 1];
-          toggleItemReturn(lastItem.id);
-        }
-      } else if (e.key === "Escape") {
-        if (activeWeighModal) setActiveWeighModal(null);
-        else if (activeMatrixModal) setActiveMatrixModal(null);
-        else if (activeModifierModal) setActiveModifierModal(null);
-        else if (isCustomerModalOpen) setIsCustomerModalOpen(false);
-        else if (activePriceModal) setActivePriceModal(null);
-        else if (checkoutSuccess) setCheckoutSuccess(null);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    cart,
-    isCheckingOut,
-    activeWeighModal,
-    activeMatrixModal,
-    activeModifierModal,
-    isCustomerModalOpen,
-    activePriceModal,
-    checkoutSuccess,
-    toggleItemReturn,
-    handleTriggerCheckout,
-  ]);
-
-  // Barcode / Search Enter Action
   const handleSearchSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     const query = searchQuery.trim().toLowerCase();
     if (!query) return;
 
-    // Check exact SKU or Barcode match first
+    // Check SKU or Barcode exact match
     for (const p of products) {
       if (!p.variants) continue;
       for (const v of p.variants) {
@@ -311,7 +271,7 @@ export default function PosPage() {
       }
     }
 
-    // Filter match single item
+    // Filter single item match
     const matches = products.filter(
       (p) =>
         p.name.toLowerCase().includes(query) ||
@@ -321,9 +281,9 @@ export default function PosPage() {
       handleProductCardClick(matches[0]);
       setSearchQuery("");
     }
-  }, [searchQuery, products, isWeighableProduct, isModifierProduct, addItem, handleProductCardClick]);
+  }, [searchQuery, products, addItem, handleProductCardClick]);
 
-  // Catch-weight Modal Confirm
+  // Modal Confirmations
   const handleWeighConfirm = (weight: number, unitPrice: number) => {
     if (!activeWeighModal) return;
     const { product, variant } = activeWeighModal;
@@ -335,7 +295,6 @@ export default function PosPage() {
     setActiveWeighModal(null);
   };
 
-  // Matrix Modal Confirm
   const handleMatrixConfirm = (selections: MatrixSelectionItem[]) => {
     if (!activeMatrixModal) return;
     selections.forEach(({ variant, qty }) => {
@@ -358,7 +317,6 @@ export default function PosPage() {
     }
   };
 
-  // Modifier Modal Confirm
   const handleModifierConfirm = (modifiers: PosModifier[]) => {
     if (!activeModifierModal) return;
     const { product, variant } = activeModifierModal;
@@ -369,12 +327,68 @@ export default function PosPage() {
     setActiveModifierModal(null);
   };
 
-  // Price Modal Confirm
   const handlePriceConfirm = (newPrice: number) => {
     if (!activePriceModal) return;
     updateItemPrice(activePriceModal.id, newPrice);
     setActivePriceModal(null);
   };
+
+  // Keyboard Shortcuts (F1-F12, Escape)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "F1") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      } else if (e.key === "F2") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      } else if (e.key === "F4") {
+        e.preventDefault();
+        setIsCustomerModalOpen((prev) => !prev);
+      } else if (e.key === "F8") {
+        e.preventDefault();
+        if (cart.length > 0 && !isCheckingOut) {
+          handleTriggerCheckout();
+        }
+      } else if (e.key === "F9") {
+        e.preventDefault();
+        if (cart.length > 0) {
+          toggleItemReturn(cart[cart.length - 1].id);
+        }
+      } else if (e.key === "F10") {
+        e.preventDefault();
+        if (cart.length > 0) {
+          clearCart();
+        }
+      } else if (e.key === "Escape") {
+        if (activeWeighModal) setActiveWeighModal(null);
+        else if (activeMatrixModal) setActiveMatrixModal(null);
+        else if (activeModifierModal) setActiveModifierModal(null);
+        else if (isCustomerModalOpen) setIsCustomerModalOpen(false);
+        else if (activePriceModal) setActivePriceModal(null);
+        else if (checkoutSuccess) {
+          setCheckoutSuccess(null);
+          searchInputRef.current?.focus();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    cart,
+    isCheckingOut,
+    activeWeighModal,
+    activeMatrixModal,
+    activeModifierModal,
+    isCustomerModalOpen,
+    activePriceModal,
+    checkoutSuccess,
+    toggleItemReturn,
+    clearCart,
+    handleTriggerCheckout,
+  ]);
 
   const orderTabs = useMemo(() => [
     {
@@ -391,6 +405,10 @@ export default function PosPage() {
       {/* 1. Header Bar */}
       <PosHeader
         storeName={storeSetting?.name || "Magic Store"}
+        warehouses={warehouses}
+        activeWarehouseId={activeWarehouseId}
+        onSelectWarehouse={setActiveWarehouseId}
+        shiftName={activeShift}
         cashierName="Thu ngân"
         isOnline={isOnline}
         offlineCount={offlineQueue.length}
@@ -399,35 +417,18 @@ export default function PosPage() {
         onSyncOffline={handleSyncOfflineQueue}
       />
 
-      {/* 2. Order Tabs Bar */}
-      <PosTabsBar
-        orders={orderTabs}
-        activeOrderId={activeOrderId}
-        onSelectOrder={setActiveOrderId}
-        onAddOrder={() => {}}
-        onCloseOrder={() => {}}
-      />
-
-      {/* 3. Main Two-Column Viewport */}
-      <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
-        {/* LEFT COLUMN (~60%): PRODUCT SEARCH & TOUCH GRID */}
-        <section className="w-full lg:w-[60%] flex flex-col min-w-0 border-r border-border-subtle bg-surface-app h-full">
-          <PosProductGrid
-            products={products}
-            categories={categories}
-            selectedCategoryId={selectedCategoryId}
-            onSelectCategory={setSelectedCategoryId}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            onSearchSubmit={handleSearchSubmit}
-            onProductClick={handleProductCardClick}
-            isLoading={isLoadingData}
-            searchInputRef={searchInputRef}
+      {/* 2. Main Two-Column Viewport */}
+      <main className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
+        {/* LEFT COLUMN (~40%): ORDER TABS + CART TABLE + CHECKOUT PANEL */}
+        <section className="w-full lg:w-[42%] xl:w-[38%] flex flex-col min-w-0 border-r border-border-subtle bg-surface-card h-full">
+          <PosTabsBar
+            orders={orderTabs}
+            activeOrderId={activeOrderId}
+            onSelectOrder={setActiveOrderId}
+            onAddOrder={() => {}}
+            onCloseOrder={() => {}}
           />
-        </section>
 
-        {/* RIGHT COLUMN (~40%): CART TABLE & CHECKOUT PANEL */}
-        <section className="w-full lg:w-[40%] flex flex-col min-w-0 bg-surface-card h-full">
           <PosCartTable
             items={cart}
             onUpdateQty={updateItemQty}
@@ -443,6 +444,8 @@ export default function PosPage() {
             subtotal={getSubtotal()}
             discountAmount={discountAmount}
             onDiscountChange={setDiscount}
+            surchargeAmount={surchargeAmount}
+            onSurchargeChange={setSurcharge}
             totalAmount={getTotalAmount()}
             paymentMethod={paymentMethod as any}
             onPaymentMethodChange={(m) => setPaymentMethod(m as any)}
@@ -457,7 +460,23 @@ export default function PosPage() {
             shortcutLabel="F8"
           />
         </section>
-      </div>
+
+        {/* RIGHT COLUMN (~60%): PRODUCT SEARCH & TOUCH GRID */}
+        <section className="w-full lg:w-[58%] xl:w-[62%] flex flex-col min-w-0 bg-surface-app h-full">
+          <PosProductGrid
+            products={products}
+            categories={categories}
+            selectedCategoryId={selectedCategoryId}
+            onSelectCategory={setSelectedCategoryId}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            onSearchSubmit={handleSearchSubmit}
+            onProductClick={handleProductCardClick}
+            isLoading={isLoadingData}
+            searchInputRef={searchInputRef}
+          />
+        </section>
+      </main>
 
       {/* ===================== MODALS ===================== */}
 
@@ -472,7 +491,7 @@ export default function PosPage() {
         />
       )}
 
-      {/* Modal 2: Matrix Variant Selector (Attribute Rows) */}
+      {/* Modal 2: Matrix Variant Selector */}
       {activeMatrixModal && (
         <PosMatrixModal
           isOpen={Boolean(activeMatrixModal)}
@@ -593,7 +612,7 @@ export default function PosPage() {
                 setCheckoutSuccess(null);
                 searchInputRef.current?.focus();
               }}
-              className="w-full py-2.5 rounded-sm bg-brand hover:bg-brand-hover text-white font-bold text-sm transition-colors shadow-sm"
+              className="w-full py-2.5 rounded-sm bg-brand hover:bg-brand-hover text-white font-bold text-sm transition-colors shadow-sm cursor-pointer"
             >
               Đơn hàng mới (Tiếp tục bán) [Esc]
             </button>
