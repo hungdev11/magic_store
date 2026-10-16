@@ -10,7 +10,7 @@ export interface PosWeighModalProps {
   isOpen: boolean;
   onClose: () => void;
   product: Product;
-  variant: ProductVariant;
+  variant?: ProductVariant | null;
   onConfirm: (weight: number, unitPrice: number) => void;
 }
 
@@ -26,14 +26,14 @@ export const PosWeighModal: React.FC<PosWeighModalProps> = ({
   onConfirm,
 }) => {
   const [weightInput, setWeightInput] = useState<string>("1.000");
-  const [unitPrice, setUnitPrice] = useState<number>(Number(variant.base_selling_price) || 0);
+  const [unitPrice, setUnitPrice] = useState<number>(Number(variant?.base_selling_price) || 0);
   const [isReadingSerial, setIsReadingSerial] = useState(false);
   const [serialStatus, setSerialStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setWeightInput("1.000");
-      setUnitPrice(Number(variant.base_selling_price) || 0);
+      setUnitPrice(Number(variant?.base_selling_price) || 0);
       setSerialStatus(null);
     }
   }, [isOpen, variant]);
@@ -67,7 +67,7 @@ export const PosWeighModal: React.FC<PosWeighModalProps> = ({
 
   const parsedWeight = parseFloat(weightInput) || 0;
   const totalPrice = parsedWeight * unitPrice;
-  const minPrice = Number(variant.min_selling_price) || 0;
+  const minPrice = Number(variant?.min_selling_price) || 0;
   const isBelowMinPrice = minPrice > 0 && unitPrice < minPrice;
 
   const handleConfirm = () => {
@@ -87,7 +87,7 @@ export const PosWeighModal: React.FC<PosWeighModalProps> = ({
           <span>Cân Điện Tử & Tính Giá</span>
         </div>
       }
-      description={`Mã: ${variant.sku} | ĐVT gốc: ${product.base_uom}`}
+      description={`Mã: ${variant?.sku || ""} | ĐVT gốc: ${product?.base_uom || ""}`}
       footer={
         <div className="flex items-center justify-end gap-2 w-full">
           <Button variant="secondary" size="md" onClick={onClose}>
@@ -102,8 +102,8 @@ export const PosWeighModal: React.FC<PosWeighModalProps> = ({
       <div className="space-y-4">
         {/* Product Details Header */}
         <div>
-          <h4 className="font-bold text-text-main text-base truncate">{product.name}</h4>
-          {variant.variant_name && (
+          <h4 className="font-bold text-text-main text-base truncate">{product?.name}</h4>
+          {variant?.variant_name && (
             <p className="text-xs text-text-sub mt-0.5">{variant.variant_name}</p>
           )}
         </div>

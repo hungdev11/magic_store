@@ -148,6 +148,30 @@ export const PosMatrixModal: React.FC<PosMatrixModalProps> = ({
     }
   };
 
+  const handleSingleSelect = (v: ProductVariant) => {
+    if (onSelectSingle) {
+      onSelectSingle(v);
+    } else {
+      onConfirm([{ variant: v, qty: 1 }]);
+    }
+    onClose();
+  };
+
+  const handleInputKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    v: ProductVariant
+  ) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const q = quantities[v.id] || 0;
+      if (q > 0) {
+        handleConfirm();
+      } else {
+        handleSingleSelect(v);
+      }
+    }
+  };
+
   const has2DMatrix = colValues.length > 0;
 
   return (
@@ -249,7 +273,9 @@ export const PosMatrixModal: React.FC<PosMatrixModalProps> = ({
                       return (
                         <td
                           key={colVal}
-                          className={`p-2 border-r last:border-r-0 border-border-subtle text-center ${
+                          onDoubleClick={() => handleSingleSelect(v)}
+                          title="Nhấp đúp để chọn nhanh 1 sản phẩm"
+                          className={`p-2 border-r last:border-r-0 border-border-subtle text-center cursor-pointer select-none ${
                             qty > 0 ? "bg-brand/5" : ""
                           }`}
                         >
@@ -270,7 +296,10 @@ export const PosMatrixModal: React.FC<PosMatrixModalProps> = ({
                             <div className="flex items-center justify-center gap-1 mt-1">
                               <button
                                 type="button"
-                                onClick={() => updateQty(v.id, -1)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateQty(v.id, -1);
+                                }}
                                 disabled={qty <= 0}
                                 className="w-6 h-6 rounded-sm border border-border-default flex items-center justify-center text-text-sub hover:text-text-main hover:bg-surface-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                               >
@@ -281,6 +310,9 @@ export const PosMatrixModal: React.FC<PosMatrixModalProps> = ({
                                 min="0"
                                 value={qty || ""}
                                 placeholder="0"
+                                onClick={(e) => e.stopPropagation()}
+                                onDoubleClick={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => handleInputKeyDown(e, v)}
                                 onChange={(e) =>
                                   setQtyDirect(v.id, parseInt(e.target.value, 10) || 0)
                                 }
@@ -288,7 +320,10 @@ export const PosMatrixModal: React.FC<PosMatrixModalProps> = ({
                               />
                               <button
                                 type="button"
-                                onClick={() => updateQty(v.id, 1)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateQty(v.id, 1);
+                                }}
                                 className="w-6 h-6 rounded-sm border border-border-default flex items-center justify-center text-text-sub hover:text-text-main hover:bg-surface-muted transition-colors"
                               >
                                 <Plus className="w-3 h-3" />
@@ -316,7 +351,9 @@ export const PosMatrixModal: React.FC<PosMatrixModalProps> = ({
               return (
                 <div
                   key={v.id}
-                  className={`p-3 rounded-sm border transition-colors flex flex-col justify-between ${
+                  onDoubleClick={() => handleSingleSelect(v)}
+                  title="Nhấp đúp để chọn nhanh 1 sản phẩm"
+                  className={`p-3 rounded-sm border transition-colors flex flex-col justify-between cursor-pointer select-none ${
                     qty > 0
                       ? "border-brand bg-brand/5"
                       : "border-border-default bg-surface-card hover:border-border-focus"
@@ -354,7 +391,10 @@ export const PosMatrixModal: React.FC<PosMatrixModalProps> = ({
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
-                        onClick={() => updateQty(v.id, -1)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          updateQty(v.id, -1);
+                        }}
                         disabled={qty <= 0}
                         className="w-7 h-7 rounded-sm border border-border-default flex items-center justify-center text-text-sub hover:text-text-main hover:bg-surface-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                       >
@@ -365,6 +405,9 @@ export const PosMatrixModal: React.FC<PosMatrixModalProps> = ({
                         min="0"
                         value={qty || ""}
                         placeholder="0"
+                        onClick={(e) => e.stopPropagation()}
+                        onDoubleClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => handleInputKeyDown(e, v)}
                         onChange={(e) =>
                           setQtyDirect(v.id, parseInt(e.target.value, 10) || 0)
                         }
@@ -372,7 +415,10 @@ export const PosMatrixModal: React.FC<PosMatrixModalProps> = ({
                       />
                       <button
                         type="button"
-                        onClick={() => updateQty(v.id, 1)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          updateQty(v.id, 1);
+                        }}
                         className="w-7 h-7 rounded-sm border border-border-default flex items-center justify-center text-text-sub hover:text-text-main hover:bg-surface-muted transition-colors"
                       >
                         <Plus className="w-3.5 h-3.5" />

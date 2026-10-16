@@ -11,7 +11,7 @@ export interface PosModifierModalProps {
   isOpen: boolean;
   onClose: () => void;
   product: Product;
-  variant: ProductVariant;
+  variant?: ProductVariant | null;
   availableModifiers?: PosModifier[];
   onConfirm: (modifiers: PosModifier[]) => void;
 }
@@ -63,7 +63,7 @@ export const PosModifierModal: React.FC<PosModifierModalProps> = ({
     return selectedToppings.reduce((acc, m) => acc + (Number(m.price) || 0), 0);
   }, [selectedToppings]);
 
-  const basePrice = Number(variant.base_selling_price) || 0;
+  const basePrice = Number(variant?.base_selling_price) || 0;
   const combinedTotal = basePrice + toppingsTotal;
 
   const handleConfirm = () => {
@@ -193,15 +193,21 @@ export const PosModifierModal: React.FC<PosModifierModalProps> = ({
               return (
                 <label
                   key={mod.name}
-                  onClick={() => toggleTopping(mod)}
-                  className={`flex items-center justify-between p-2.5 rounded-sm border cursor-pointer transition-colors ${
+                  className={`flex items-center justify-between p-2.5 rounded-sm border cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-brand/40 ${
                     isChecked
                       ? "bg-brand/5 border-brand"
                       : "bg-surface-card border-border-default hover:bg-surface-muted"
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleTopping(mod)}
+                      className="sr-only"
+                    />
                     <div
+                      aria-hidden="true"
                       className={`w-4 h-4 rounded-sm border flex items-center justify-center transition-colors ${
                         isChecked
                           ? "bg-brand border-brand text-white"

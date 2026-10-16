@@ -61,6 +61,16 @@ export const PosPriceModal: React.FC<PosPriceModalProps> = ({
       ? Math.round(((item.originalUnitPrice - currentPrice) / item.originalUnitPrice) * 100)
       : 0;
 
+  const handleSwitchTab = (tab: "PRICE" | "DISCOUNT") => {
+    if (tab === activeTab) return;
+    if (tab === "PRICE") {
+      setPriceString(currentPrice.toString());
+    } else {
+      setDiscountString(effectiveDiscountPercent.toString());
+    }
+    setActiveTab(tab);
+  };
+
   const handleKeypadPress = (val: string) => {
     if (activeTab === "PRICE") {
       if (val === "DEL") {
@@ -145,7 +155,7 @@ export const PosPriceModal: React.FC<PosPriceModalProps> = ({
         <div className="grid grid-cols-2 gap-1 p-0.5 rounded-sm bg-surface-muted border border-border-subtle">
           <button
             type="button"
-            onClick={() => setActiveTab("PRICE")}
+            onClick={() => handleSwitchTab("PRICE")}
             className={`py-1.5 text-xs font-semibold rounded-sm transition-colors flex items-center justify-center gap-1.5 ${
               activeTab === "PRICE"
                 ? "bg-surface-card text-text-main border border-border-default shadow-sm"
@@ -157,7 +167,7 @@ export const PosPriceModal: React.FC<PosPriceModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("DISCOUNT")}
+            onClick={() => handleSwitchTab("DISCOUNT")}
             className={`py-1.5 text-xs font-semibold rounded-sm transition-colors flex items-center justify-center gap-1.5 ${
               activeTab === "DISCOUNT"
                 ? "bg-surface-card text-text-main border border-border-default shadow-sm"
