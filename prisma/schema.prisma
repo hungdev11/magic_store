@@ -6,3 +6,403 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// --------------------------------------------------------
+// ENUMS (14)
+// --------------------------------------------------------
+
+enum CostingMethod {
+  WAC
+  FIFO
+}
+
+enum ProductType {
+  RAW_MATERIAL
+  WIP_SEMI_FINISHED
+  FINISHED_GOOD
+  SERVICE
+  COMBO
+}
+
+enum ProductionMode {
+  NONE
+  BATCH_MANUFACTURE
+  POS_BACKFLUSH
+  DISASSEMBLY
+}
+
+enum MovementType {
+  PURCHASE_IN
+  SALE_OUT
+  RETURN_IN
+  PRODUCTION_CONSUME
+  PRODUCTION_YIELD
+  STATE_TRANSFORM
+  WASTAGE_SPOILAGE
+  STOCKTAKE_ADJUST
+}
+
+enum RecipeType {
+  ASSEMBLY
+  DISASSEMBLY
+}
+
+enum ProductionStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum PosSessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum OrderStatus {
+  COMPLETED
+  PARTIAL_PAID
+  DEBT
+  RETURNED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_QR
+  MIXED
+  CREDIT
+}
+
+enum PartnerType {
+  CUSTOMER
+  SUPPLIER
+  BOTH
+}
+
+enum DebtTransactionType {
+  SALE_DEBT
+  DEBT_REPAYMENT
+  SUPPLIER_INVOICE
+  SUPPLIER_PAYMENT
+}
+
+enum CashbookType {
+  INFLOW
+  OUTFLOW
+}
+
+enum CashbookCategory {
+  SALES_REVENUE
+  DEBT_COLLECTION
+  SUPPLIER_PAYMENT
+  RENT
+  ELECTRICITY
+  ICE_PACKAGING
+  STAFF_WAGE
+  SHIPPING
+  OTHER_EXPENSE
+}
+
+enum CashbookPaymentMethod {
+  CASH
+  BANK_TRANSFER
+}
+
+// --------------------------------------------------------
+// MODELS (18 Core + Topping/Modifier)
+// --------------------------------------------------------
+
+model StoreSetting {
+  id              String        @id @default(cuid())
+  name            String
+  currency        String        @default("VND")
+  costing_method  CostingMethod @default(WAC)
+  enabled_modules Json          @db.JsonB
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+}
+
+model Category {
+  id         String     @id @default(cuid())
+  name       String
+  code       String     @unique
+  parent_id  String?
+  parent     Category?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children   Category[] @relation("CategoryHierarchy")
+  products   Product[]
+  created_at DateTime   @default(now())
+  updated_at DateTime   @updatedAt
+}
+
+model Product {
+  id              String                 @id @default(cuid())
+  name            String
+  code            String                 @unique
+  category_id     String
+  category        Category               @relation(fields: [category_id], references: [id])
+  product_type    ProductType
+  base_uom        String
+  is_weighable    Boolean                @default(false)
+  track_inventory Boolean                @default(true)
+  track_batches   Boolean                @default(false)
+  production_mode ProductionMode         @default(NONE)
+  variants        ProductVariant[]
+  modifier_groups ProductModifierGroup[]
+  created_at      DateTime               @default(now())
+  updated_at      DateTime               @updatedAt
+}
+
+model ProductVariant {
+  id                    String              @id @default(cuid())
+  product_id            String
+  product               Product             @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  sku                   String              @unique
+  barcode               String?             @unique
+  variant_name          String
+  attributes            Json                @default("{}") @db.JsonB
+  cost_price            Decimal             @default(0) @db.Decimal(15, 2)
+  base_selling_price    Decimal             @default(0) @db.Decimal(15, 2)
+  min_selling_price     Decimal             @default(0) @db.Decimal(15, 2)
+  current_stock         Decimal             @default(0) @db.Decimal(12, 4)
+  min_stock_alert       Decimal             @default(0) @db.Decimal(12, 4)
+  uom_conversions       UomConversion[]
+  batches               InventoryBatch[]
+  movements             InventoryMovement[]
+  bom_recipes_as_target BomRecipe[]         @relation("BomRecipeTarget")
+  bom_items             BomItem[]           @relation("BomItemComponent")
+  order_items           SalesOrderItem[]
+  modifier_items        ModifierItem[]
+  created_at            DateTime            @default(now())
+  updated_at            DateTime            @updatedAt
+}
+
+model UomConversion {
+  id                    String         @id @default(cuid())
+  variant_id            String
+  variant               ProductVariant @relation(fields: [variant_id], references: [id], onDelete: Cascade)
+  uom_name              String
+  conversion_factor     Decimal        @db.Decimal(12, 4)
+  is_variable_ratio     Boolean        @default(false)
+  default_price_for_uom Decimal?       @db.Decimal(15, 2)
+  created_at            DateTime       @default(now())
+  updated_at            DateTime       @updatedAt
+
+  @@unique([variant_id, uom_name])
+}
+
+model ModifierGroup {
+  id            String                 @id @default(cuid())
+  name          String
+  min_selection Int                    @default(0)
+  max_selection Int?
+  is_required   Boolean                @default(false)
+  items         ModifierItem[]
+  products      ProductModifierGroup[]
+  created_at    DateTime               @default(now())
+  updated_at    DateTime               @updatedAt
+}
+
+model ModifierItem {
+  id                String          @id @default(cuid())
+  modifier_group_id String
+  modifier_group    ModifierGroup   @relation(fields: [modifier_group_id], references: [id], onDelete: Cascade)
+  name              String
+  price             Decimal         @default(0) @db.Decimal(15, 2)
+  linked_variant_id String?
+  linked_variant    ProductVariant? @relation(fields: [linked_variant_id], references: [id])
+  deduct_qty        Decimal?        @db.Decimal(12, 4)
+  created_at        DateTime        @default(now())
+  updated_at        DateTime        @updatedAt
+}
+
+model ProductModifierGroup {
+  id                String        @id @default(cuid())
+  product_id        String
+  product           Product       @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  modifier_group_id String
+  modifier_group    ModifierGroup @relation(fields: [modifier_group_id], references: [id], onDelete: Cascade)
+  display_order     Int           @default(0)
+  created_at        DateTime      @default(now())
+
+  @@unique([product_id, modifier_group_id])
+}
+
+model InventoryBatch {
+  id            String              @id @default(cuid())
+  variant_id    String
+  variant       ProductVariant      @relation(fields: [variant_id], references: [id])
+  batch_code    String
+  supplier_id   String?
+  supplier      Partner?            @relation(fields: [supplier_id], references: [id])
+  received_date DateTime            @default(now())
+  expiry_date   DateTime?
+  initial_qty   Decimal             @db.Decimal(12, 4)
+  remaining_qty Decimal             @db.Decimal(12, 4)
+  unit_cost     Decimal             @db.Decimal(15, 2)
+  movements     InventoryMovement[]
+  order_items   SalesOrderItem[]
+  created_at    DateTime            @default(now())
+  updated_at    DateTime            @updatedAt
+
+  @@unique([variant_id, batch_code])
+}
+
+model InventoryMovement {
+  id                String          @id @default(cuid())
+  variant_id        String
+  variant           ProductVariant  @relation(fields: [variant_id], references: [id])
+  batch_id          String?
+  batch             InventoryBatch? @relation(fields: [batch_id], references: [id])
+  movement_type     MovementType
+  qty_in_base_uom   Decimal         @db.Decimal(12, 4)
+  input_uom         String
+  input_qty         Decimal         @db.Decimal(12, 4)
+  unit_cost_at_time Decimal         @db.Decimal(15, 2)
+  reference_id      String?
+  reason_note       String?
+  created_at        DateTime        @default(now())
+}
+
+model BomRecipe {
+  id                       String            @id @default(cuid())
+  target_variant_id        String
+  target_variant           ProductVariant    @relation("BomRecipeTarget", fields: [target_variant_id], references: [id])
+  recipe_type              RecipeType
+  output_qty               Decimal           @db.Decimal(12, 4)
+  expected_wastage_percent Decimal           @default(0) @db.Decimal(5, 2)
+  items                    BomItem[]
+  production_orders        ProductionOrder[]
+  created_at               DateTime          @default(now())
+  updated_at               DateTime          @updatedAt
+}
+
+model BomItem {
+  id                      String         @id @default(cuid())
+  recipe_id               String
+  recipe                  BomRecipe      @relation(fields: [recipe_id], references: [id], onDelete: Cascade)
+  component_variant_id    String
+  component_variant       ProductVariant @relation("BomItemComponent", fields: [component_variant_id], references: [id])
+  qty_required            Decimal        @db.Decimal(12, 4)
+  cost_allocation_percent Decimal        @default(0) @db.Decimal(5, 2)
+  created_at              DateTime       @default(now())
+  updated_at              DateTime       @updatedAt
+}
+
+model ProductionOrder {
+  id                  String           @id @default(cuid())
+  recipe_id           String
+  recipe              BomRecipe        @relation(fields: [recipe_id], references: [id])
+  batch_code          String?
+  status              ProductionStatus @default(DRAFT)
+  input_qty           Decimal          @db.Decimal(12, 4)
+  actual_yield_qty    Decimal          @default(0) @db.Decimal(12, 4)
+  total_material_cost Decimal          @default(0) @db.Decimal(15, 2)
+  other_cost          Decimal          @default(0) @db.Decimal(15, 2)
+  notes               String?
+  created_at          DateTime         @default(now())
+  updated_at          DateTime         @updatedAt
+}
+
+model Partner {
+  id                   String                @id @default(cuid())
+  partner_type         PartnerType
+  name                 String
+  phone                String?
+  address              String?
+  price_tier           String                @default("RETAIL")
+  current_debt_balance Decimal               @default(0) @db.Decimal(15, 2)
+  credit_limit         Decimal               @default(0) @db.Decimal(15, 2)
+  supplied_batches     InventoryBatch[]
+  orders               SalesOrder[]
+  debt_entries         DebtLedger[]
+  cashbook_entries     CashbookTransaction[]
+  created_at           DateTime              @default(now())
+  updated_at           DateTime              @updatedAt
+}
+
+model PosSession {
+  id                   String                @id @default(cuid())
+  cashier_name         String
+  started_at           DateTime              @default(now())
+  closed_at            DateTime?
+  opening_cash         Decimal               @default(0) @db.Decimal(15, 2)
+  closing_cash_actual  Decimal?              @db.Decimal(15, 2)
+  total_sales_amount   Decimal               @default(0) @db.Decimal(15, 2)
+  total_cash_collected Decimal               @default(0) @db.Decimal(15, 2)
+  total_bank_collected Decimal               @default(0) @db.Decimal(15, 2)
+  status               PosSessionStatus      @default(OPEN)
+  orders               SalesOrder[]
+  cashbook_entries     CashbookTransaction[]
+  created_at           DateTime              @default(now())
+  updated_at           DateTime              @updatedAt
+}
+
+model SalesOrder {
+  id               String                @id @default(cuid())
+  order_number     String                @unique
+  customer_id      String?
+  customer         Partner?              @relation(fields: [customer_id], references: [id])
+  pos_session_id   String?
+  pos_session      PosSession?           @relation(fields: [pos_session_id], references: [id])
+  status           OrderStatus           @default(COMPLETED)
+  subtotal         Decimal               @db.Decimal(15, 2)
+  discount_amount  Decimal               @default(0) @db.Decimal(15, 2)
+  surcharge_amount Decimal               @default(0) @db.Decimal(15, 2)
+  total_amount     Decimal               @db.Decimal(15, 2)
+  paid_amount      Decimal               @default(0) @db.Decimal(15, 2)
+  debt_amount      Decimal               @default(0) @db.Decimal(15, 2)
+  total_cogs       Decimal               @default(0) @db.Decimal(15, 2)
+  payment_method   PaymentMethod         @default(CASH)
+  items            SalesOrderItem[]
+  cashbook_entries CashbookTransaction[]
+  created_at       DateTime              @default(now())
+  updated_at       DateTime              @updatedAt
+}
+
+model SalesOrderItem {
+  id                       String          @id @default(cuid())
+  order_id                 String
+  order                    SalesOrder      @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  variant_id               String
+  variant                  ProductVariant  @relation(fields: [variant_id], references: [id])
+  batch_id                 String?
+  batch                    InventoryBatch? @relation(fields: [batch_id], references: [id])
+  sold_uom                 String
+  sold_qty                 Decimal         @db.Decimal(12, 4)
+  actual_base_qty_deducted Decimal         @db.Decimal(12, 4)
+  original_unit_price      Decimal         @db.Decimal(15, 2)
+  actual_unit_price        Decimal         @db.Decimal(15, 2)
+  modifiers_json           Json?           @db.JsonB
+  line_cogs                Decimal         @default(0) @db.Decimal(15, 2)
+  is_return                Boolean         @default(false)
+  created_at               DateTime        @default(now())
+}
+
+model DebtLedger {
+  id               String              @id @default(cuid())
+  partner_id       String
+  partner          Partner             @relation(fields: [partner_id], references: [id])
+  transaction_type DebtTransactionType
+  reference_id     String?
+  amount           Decimal             @db.Decimal(15, 2)
+  balance_after    Decimal             @db.Decimal(15, 2)
+  note             String?
+  created_at       DateTime            @default(now())
+}
+
+model CashbookTransaction {
+  id               String                @id @default(cuid())
+  transaction_type CashbookType
+  category         CashbookCategory
+  amount           Decimal               @db.Decimal(15, 2)
+  payment_method   CashbookPaymentMethod @default(CASH)
+  partner_id       String?
+  partner          Partner?              @relation(fields: [partner_id], references: [id])
+  sales_order_id   String?
+  sales_order      SalesOrder?           @relation(fields: [sales_order_id], references: [id])
+  pos_session_id   String?
+  pos_session      PosSession?           @relation(fields: [pos_session_id], references: [id])
+  description      String
+  created_at       DateTime              @default(now())
+}
