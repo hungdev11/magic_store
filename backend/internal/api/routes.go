@@ -63,6 +63,11 @@ func NewServer(
 	mux.HandleFunc("POST /api/inventory/purchase", s.handlePurchaseReceiving)
 	mux.HandleFunc("POST /api/inventory/wastage", s.handleWastage)
 
+	// Batches & Traceability
+	mux.HandleFunc("GET /api/batches", s.handleGetBatches)
+	mux.HandleFunc("GET /api/batches/{id}/trace", s.handleGetBatchTrace)
+	mux.HandleFunc("PUT /api/batches/{id}", s.handleUpdateBatch)
+
 	// BOM & Production
 	mux.HandleFunc("GET /api/bom/recipes", s.handleGetBomRecipes)
 	mux.HandleFunc("POST /api/bom/recipes", s.handleCreateBomRecipe)

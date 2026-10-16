@@ -1467,3 +1467,135 @@ func (s *Server) handlePosCheckout(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, resultOrder)
 }
+
+// ----------------------------------------------------------------------------
+// Batch Handlers & Traceability
+// ----------------------------------------------------------------------------
+
+func (s *Server) handleGetBatches(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	status := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("status")))
+
+	query := s.db.Model(&model.InventoryBatch{}).
+		Preload("Variant.Product").
+		Preload("Supplier")
+
+	if q != "" {
+		like := "%" + q + "%"
+		query = query.Where(
+			"inventory_batches.batch_code LIKE ? OR inventory_batches.notes LIKE ? OR inventory_batches.variant_id IN (SELECT pv.id FROM product_variants pv LEFT JOIN products p ON p.id = pv.product_id WHERE pv.sku LIKE ? OR p.name LIKE ?)",
+			like, like, like, like,
+		)
+	}
+
+	now := time.Now()
+	expiringThreshold := now.AddDate(0, 0, 30)
+
+	switch status {
+	case "ACTIVE":
+		query = query.Where("remaining_qty > 0 AND (expiry_date IS NULL OR expiry_date > ?)", now)
+	case "EXPIRING_SOON":
+		query = query.Where("remaining_qty > 0 AND expiry_date IS NOT NULL AND expiry_date > ? AND expiry_date <= ?", now, expiringThreshold)
+	case "EXPIRED":
+		query = query.Where("expiry_date IS NOT NULL AND expiry_date <= ?", now)
+	case "OUT_OF_STOCK":
+		query = query.Where("remaining_qty <= 0")
+	}
+
+	var batches []model.InventoryBatch
+	if err := query.Order("created_at DESC").Find(&batches).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if batches == nil {
+		batches = []model.InventoryBatch{}
+	}
+	writeJSON(w, http.StatusOK, batches)
+}
+
+func (s *Server) handleGetBatchTrace(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "batch id is required")
+		return
+	}
+
+	var batch model.InventoryBatch
+	if err := s.db.First(&batch, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(w, http.StatusNotFound, "batch not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	var movements []model.InventoryMovement
+	if err := s.db.Where("batch_id = ?", id).Order("created_at DESC").Find(&movements).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if movements == nil {
+		movements = []model.InventoryMovement{}
+	}
+	writeJSON(w, http.StatusOK, movements)
+}
+
+func (s *Server) handleUpdateBatch(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "batch id is required")
+		return
+	}
+
+	var batch model.InventoryBatch
+	if err := s.db.First(&batch, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(w, http.StatusNotFound, "batch not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if rawNotes, ok := raw["notes"]; ok {
+		var notes string
+		if err := json.Unmarshal(rawNotes, &notes); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid notes")
+			return
+		}
+		batch.Notes = notes
+	}
+
+	if rawExpiry, ok := raw["expiry_date"]; ok {
+		if string(rawExpiry) == "null" {
+			batch.ExpiryDate = nil
+		} else {
+			var expiry time.Time
+			if err := json.Unmarshal(rawExpiry, &expiry); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid expiry_date")
+				return
+			}
+			batch.ExpiryDate = &expiry
+		}
+	}
+
+	if err := s.db.Save(&batch).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if err := s.db.Preload("Variant.Product").Preload("Supplier").First(&batch, "id = ?", batch.ID).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, batch)
+}
