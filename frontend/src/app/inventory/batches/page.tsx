@@ -5,8 +5,13 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
 import { BatchItem, api } from "@/lib/api";
 import { formatQty } from "@/lib/design-tokens";
-import { Button } from "@/components/common/Button";
-import { Input } from "@/components/common/Input";
+import {
+  PageHeader,
+  Button,
+  Input,
+  Badge,
+  AlertBanner,
+} from "@/components/common";
 import { BatchEditModal } from "@/components/inventory/BatchEditModal";
 import { BatchTraceDrawer } from "@/components/inventory/BatchTraceDrawer";
 import {
@@ -14,13 +19,10 @@ import {
   Pencil,
   History,
   RefreshCw,
-  AlertCircle,
-  CalendarClock,
   ArrowDownToLine,
   Trash2,
   Boxes,
   Loader2,
-  Calendar,
 } from "lucide-react";
 
 type BatchStatusFilter = "ALL" | "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | "OUT_OF_STOCK";
@@ -28,7 +30,7 @@ type BatchStatusFilter = "ALL" | "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | "OUT_O
 interface BatchStatusInfo {
   key: BatchStatusFilter;
   label: string;
-  className: string;
+  badgeVariant: "inflow" | "outflow" | "alert" | "default";
 }
 
 function getBatchStatusInfo(batch: BatchItem): BatchStatusInfo {
@@ -37,7 +39,7 @@ function getBatchStatusInfo(batch: BatchItem): BatchStatusInfo {
     return {
       key: "OUT_OF_STOCK",
       label: "Hết hàng",
-      className: "bg-surface-muted text-text-sub border-border-subtle",
+      badgeVariant: "default",
     };
   }
 
@@ -45,7 +47,7 @@ function getBatchStatusInfo(batch: BatchItem): BatchStatusInfo {
     return {
       key: "ACTIVE",
       label: "Còn hạn",
-      className: "bg-inflow-light text-inflow border-inflow/20",
+      badgeVariant: "inflow",
     };
   }
 
@@ -55,7 +57,7 @@ function getBatchStatusInfo(batch: BatchItem): BatchStatusInfo {
     return {
       key: "EXPIRED",
       label: "Đã hết hạn",
-      className: "bg-outflow-light text-outflow border-outflow/20",
+      badgeVariant: "outflow",
     };
   }
 
@@ -64,14 +66,14 @@ function getBatchStatusInfo(batch: BatchItem): BatchStatusInfo {
     return {
       key: "EXPIRING_SOON",
       label: "Cận date",
-      className: "bg-alert-light text-alert border-alert/20",
+      badgeVariant: "alert",
     };
   }
 
   return {
     key: "ACTIVE",
     label: "Còn hạn",
-    className: "bg-inflow-light text-inflow border-inflow/20",
+    badgeVariant: "inflow",
   };
 }
 
@@ -156,7 +158,6 @@ function BatchesContent() {
     );
   };
 
-  // Status counters for all loaded batches
   const statusCounts = useMemo(() => {
     const counts = {
       ALL: batches.length,
@@ -183,48 +184,57 @@ function BatchesContent() {
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-7xl mx-auto">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <CalendarClock className="w-5 h-5 text-brand shrink-0" />
-            <h1 className="text-xl font-bold text-text-main">Quản lý Lô & Hạn sử dụng</h1>
+      <PageHeader
+        title="Quản lý Lô & Hạn sử dụng"
+        description="Theo dõi mã lô, vòng đời HSD, nhà cung cấp và lịch sử biến động nhập-xuất kho."
+        badge={
+          <Badge variant="brand">
+            {batches.length} lô hàng
+          </Badge>
+        }
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Link href="/inventory/purchase">
+              <Button size="sm" variant="outline" className="gap-1.5">
+                <ArrowDownToLine className="w-3.5 h-3.5 text-brand" />
+                <span>Nhập kho (PO)</span>
+              </Button>
+            </Link>
+            <Link href="/inventory/wastage">
+              <Button size="sm" variant="outline" className="gap-1.5">
+                <Trash2 className="w-3.5 h-3.5 text-text-sub" />
+                <span>Xuất hủy</span>
+              </Button>
+            </Link>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => loadBatches()}
+              disabled={isLoading}
+              title="Tải lại danh sách"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isLoading ? "animate-spin text-brand" : ""}`} />
+              <span>Tải lại</span>
+            </Button>
           </div>
-          <p className="text-xs text-text-sub mt-0.5">
-            Theo dõi mã lô, vòng đời HSD, nhà cung cấp và lịch sử biến động nhập-xuất kho
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link href="/inventory/purchase">
-            <Button size="sm" variant="outline" className="text-xs gap-1.5">
-              <ArrowDownToLine className="w-3.5 h-3.5 text-brand" />
-              <span>Nhập hàng (PO)</span>
-            </Button>
-          </Link>
-          <Link href="/inventory/wastage">
-            <Button size="sm" variant="outline" className="text-xs gap-1.5">
-              <Trash2 className="w-3.5 h-3.5 text-text-sub" />
-              <span>Xuất hủy / Hao hụt</span>
-            </Button>
-          </Link>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => loadBatches()}
-            disabled={isLoading}
-            title="Tải lại danh sách"
-            className="text-xs p-2"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
-          </Button>
-        </div>
-      </div>
+        }
+      />
+
+      {/* Load error */}
+      {loadError && (
+        <AlertBanner
+          type="error"
+          message={loadError}
+          onClose={() => setLoadError(null)}
+        />
+      )}
 
       {/* Toolbar: Search & Filter Tabs */}
-      <div className="bg-surface-card border border-border-default rounded-md p-3 space-y-3">
+      <div className="bg-surface-card border border-border-default rounded-md p-3 space-y-3 shadow-card">
         {/* Status Filter Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
           {filterTabs.map((tab) => {
             const isSelected = statusFilter === tab.key;
             return (
@@ -232,16 +242,16 @@ function BatchesContent() {
                 key={tab.key}
                 type="button"
                 onClick={() => handleStatusChange(tab.key)}
-                className={`px-3 py-1.5 rounded-sm text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                className={`px-2.5 py-1 rounded-sm text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                   isSelected
-                    ? "bg-brand text-white shadow-sm"
-                    : "bg-surface-muted text-text-sub hover:text-text-main hover:bg-surface-card-hover"
+                    ? "bg-brand text-white shadow-xs"
+                    : "bg-surface-muted text-text-sub hover:text-text-main"
                 }`}
               >
                 <span>{tab.label}</span>
                 {statusFilter === "ALL" && (
                   <span
-                    className={`font-mono tabular-nums text-[11px] px-1.5 py-0.2 rounded ${
+                    className={`font-mono tabular-nums text-[11px] px-1 py-0.2 rounded ${
                       isSelected ? "bg-white/20 text-white" : "bg-surface-card text-text-sub"
                     }`}
                   >
@@ -285,23 +295,11 @@ function BatchesContent() {
       </div>
 
       {/* Data Table */}
-      <div className="bg-surface-card border border-border-default rounded-md overflow-hidden">
-        {loadError && (
-          <div className="p-4 bg-outflow-light border-b border-outflow/20 text-xs text-outflow flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{loadError}</span>
-            </div>
-            <Button size="sm" variant="outline" onClick={() => loadBatches()}>
-              Thử lại
-            </Button>
-          </div>
-        )}
-
+      <div className="bg-surface-card border border-border-default rounded-md overflow-hidden shadow-card">
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-left border-collapse">
             <thead>
-              <tr className="bg-surface-muted/80 border-b border-border-subtle text-text-sub font-medium">
+              <tr className="bg-surface-muted border-b border-border-default text-text-sub uppercase tracking-wider text-[11px] font-semibold select-none">
                 <th className="px-3 py-2 whitespace-nowrap">Mã lô</th>
                 <th className="px-3 py-2 min-w-[200px]">Tên sản phẩm & SKU</th>
                 <th className="px-3 py-2 whitespace-nowrap">Nhà cung cấp</th>
@@ -326,8 +324,8 @@ function BatchesContent() {
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-text-sub">
                     <div className="flex flex-col items-center justify-center gap-2">
-                      <Boxes className="w-8 h-8 text-text-disabled" />
-                      <p className="font-medium text-text-main text-sm">Không tìm thấy lô hàng nào</p>
+                      <Boxes className="w-7 h-7 text-text-disabled" />
+                      <p className="font-semibold text-text-main text-sm">Không tìm thấy lô hàng nào</p>
                       <p className="text-xs text-text-sub">
                         {searchTerm || statusFilter !== "ALL"
                           ? "Hãy thử thay đổi điều kiện tìm kiếm hoặc trạng thái lọc."
@@ -347,12 +345,11 @@ function BatchesContent() {
                   return (
                     <tr
                       key={batch.id}
-                      className="hover:bg-surface-card-hover/60 transition-colors"
-                      style={{ height: "38px" }}
+                      className="hover:bg-surface-card-hover transition-colors h-[38px]"
                     >
                       {/* Mã lô */}
                       <td className="px-3 py-2 font-mono font-medium text-text-main whitespace-nowrap">
-                        <span className="bg-surface-muted px-1.5 py-0.5 rounded border border-border-subtle">
+                        <span className="bg-surface-muted px-1.5 py-0.5 rounded-sm border border-border-subtle">
                           {batch.batch_code}
                         </span>
                       </td>
@@ -363,7 +360,7 @@ function BatchesContent() {
                           {productName}
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="font-mono text-text-sub text-[11px]">{sku}</span>
+                          <span className="font-mono tabular-nums text-text-sub text-[11px]">{sku}</span>
                           {variantName && (
                             <span className="text-text-sub text-[11px] truncate max-w-[120px]">
                               • {variantName}
@@ -396,7 +393,7 @@ function BatchesContent() {
                       {/* Hạn sử dụng */}
                       <td className="px-3 py-2 font-mono tabular-nums whitespace-nowrap">
                         {batch.expiry_date ? (
-                          <span className={statusInfo.key === "EXPIRED" ? "text-outflow font-medium" : "text-text-sub"}>
+                          <span className={statusInfo.key === "EXPIRED" ? "text-outflow font-semibold" : "text-text-sub"}>
                             {formatDate(batch.expiry_date)}
                           </span>
                         ) : (
@@ -406,11 +403,9 @@ function BatchesContent() {
 
                       {/* Badge trạng thái */}
                       <td className="px-3 py-2 text-center whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium border ${statusInfo.className}`}
-                        >
+                        <Badge variant={statusInfo.badgeVariant}>
                           {statusInfo.label}
-                        </span>
+                        </Badge>
                       </td>
 
                       {/* Thao tác */}
@@ -424,7 +419,7 @@ function BatchesContent() {
                             title="Sửa hạn sử dụng và ghi chú"
                           >
                             <Pencil className="w-3.5 h-3.5" />
-                            <span>Sửa HSD</span>
+                            <span>Sửa</span>
                           </Button>
                           <Button
                             size="sm"
@@ -480,14 +475,7 @@ function BatchesContent() {
 
 export default function BatchesPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="p-8 flex items-center justify-center text-text-sub gap-2">
-          <Loader2 className="w-5 h-5 animate-spin text-brand" />
-          <span className="text-xs">Đang tải phân hệ Quản lý Lô...</span>
-        </div>
-      }
-    >
+    <Suspense fallback={<div className="p-8 text-center text-xs text-text-sub">Đang tải...</div>}>
       <BatchesContent />
     </Suspense>
   );

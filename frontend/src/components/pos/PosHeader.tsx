@@ -112,27 +112,14 @@ export const PosHeader: React.FC<PosHeaderProps> = ({
             </Badge>
           </div>
 
-          {/* Warehouse Selector */}
-          {warehouses.length > 0 ? (
-            <div className="hidden lg:flex items-center gap-1 text-xs text-text-sub pl-1">
-              <Warehouse className="w-3.5 h-3.5 text-text-sub" />
-              <select
-                value={activeWarehouseId || warehouses[0]?.id}
-                onChange={(e) => onSelectWarehouse?.(e.target.value)}
-                className="h-7 bg-surface-app border border-border-default rounded-sm px-2 text-xs text-text-main focus:outline-none focus:border-border-focus font-medium"
-              >
-                {warehouses.map((wh) => (
-                  <option key={wh.id} value={wh.id}>
-                    {wh.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <Badge variant="default" className="hidden lg:inline-flex">
-              {shiftName}
-            </Badge>
-          )}
+          {/* Warehouse & Shift Indicators */}
+          <div className="hidden lg:flex items-center gap-1.5 text-xs text-text-main bg-surface-app px-2.5 py-1 rounded-sm border border-border-default font-medium">
+            <Warehouse className="w-3.5 h-3.5 text-brand" />
+            <span>Kho chính</span>
+          </div>
+          <Badge variant="default" className="hidden sm:inline-flex">
+            {shiftName}
+          </Badge>
         </div>
 
         {/* Center Section: Keyboard Shortcuts Quick Bar */}

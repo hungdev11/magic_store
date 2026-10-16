@@ -16,8 +16,13 @@ import {
   formatVND,
   formatQty,
   formatPercent,
-  getBadgeClasses,
 } from "@/lib/design-tokens";
+import {
+  PageHeader,
+  Badge,
+  Button,
+  AlertBanner,
+} from "@/components/common";
 import {
   Factory,
   Fish,
@@ -663,65 +668,44 @@ export default function ProductionPage() {
 
       {/* Module Inactive Warning Banner (if bom_production is off) */}
       {!hasBomProduction && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-amber-900">
-                Mô-đun Chế biến & Định mức BOM hiện đang tắt trong cấu hình cửa hàng.
-              </p>
-              <p className="text-xs text-amber-700">
-                Bạn vẫn có thể thử nghiệm tính toán, hoặc bật cờ tính năng này tại trang Cài đặt.
-              </p>
-            </div>
-          </div>
-          <Link
-            href="/settings"
-            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold shadow-sm transition"
-          >
-            Mở Cài đặt
-          </Link>
-        </div>
+        <AlertBanner
+          type="warning"
+          message="Mô-đun Chế biến & Định mức BOM hiện đang tắt trong cấu hình cửa hàng. Bạn vẫn có thể thử nghiệm tính toán."
+        />
       )}
 
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border-subtle pb-5">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600 shadow-sm">
-              <Factory className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-text-main">
-                Quản lý Chế biến & Phân rã Định mức (BOM & Lệnh Sản xuất)
-              </h1>
-              <p className="text-xs text-text-sub mt-0.5">
-                Chế biến ghép (N nguyên liệu -&gt; 1 thành phẩm) và Mổ xẻ pha lóc (1 nguyên liệu -&gt; N thành phẩm có phân bổ % giá vốn).
-              </p>
-            </div>
+      <PageHeader
+        title="Quản lý Chế biến & Định mức BOM"
+        description="Chế biến ghép (ASSEMBLY) và Mổ xẻ pha lóc (DISASSEMBLY) tự động phân bổ giá vốn WAC."
+        badge={
+          <Badge variant="bom">
+            {recipes.length} công thức
+          </Badge>
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => loadData(true)}
+              disabled={isRefreshing}
+              title="Làm mới dữ liệu"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isRefreshing ? "animate-spin text-brand" : ""}`} />
+              <span>Làm mới</span>
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => openQuickRecipeModal(activeTab)}
+            >
+              <Plus className="w-4 h-4 mr-1.5" />
+              <span>Tạo công thức</span>
+            </Button>
           </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => loadData(true)}
-            disabled={isRefreshing}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-surface-card-hover border border-border-subtle rounded-lg text-xs font-medium text-text-sub hover:text-text-main transition shadow-sm"
-            title="Làm mới dữ liệu"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-indigo-600" : ""}`} />
-            <span>Làm mới</span>
-          </button>
-          <button
-            onClick={() => openQuickRecipeModal(activeTab)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-sm transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Tạo nhanh công thức định mức</span>
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Tabs Navigation */}
       <div className="bg-surface-card border border-border-subtle rounded-xl p-1.5 shadow-card flex flex-col sm:flex-row gap-2">

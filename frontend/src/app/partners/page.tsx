@@ -5,22 +5,22 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { api, Partner } from "@/lib/api";
 import { formatVND } from "@/lib/design-tokens";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/common/Button";
-import { Input } from "@/components/common/Input";
-import { Badge } from "@/components/common/Badge";
-import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import {
+  PageHeader,
+  Button,
+  Badge,
+  ConfirmDialog,
+  TableToolbar,
+  AlertBanner,
+} from "@/components/common";
 import { PartnerFormModal } from "@/components/partners/PartnerFormModal";
 import {
   Users,
   Truck,
   Plus,
-  Search,
   Pencil,
   Trash2,
   RefreshCw,
-  AlertCircle,
-  CheckCircle2,
-  X,
 } from "lucide-react";
 
 // ponytail: in-memory list filtering by role and status; upgrade to server-side cursor pagination when partners exceed 1000 records.
@@ -88,13 +88,11 @@ function PartnersContent() {
   // Filtered partners
   const filteredPartners = useMemo(() => {
     return partners.filter((p) => {
-      // Role tab match: dual-role entities appear in both tabs
       const matchesTab =
         activeTab === "SUPPLIER"
           ? p.partner_type === "SUPPLIER" || p.partner_type === "BOTH"
           : p.partner_type === "CUSTOMER" || p.partner_type === "BOTH";
 
-      // Search match
       const search = searchTerm.trim().toLowerCase();
       const matchesSearch =
         !search ||
@@ -102,7 +100,6 @@ function PartnersContent() {
         (p.phone && p.phone.toLowerCase().includes(search)) ||
         (p.address && p.address.toLowerCase().includes(search));
 
-      // Status match
       const isActive = p.is_active !== false;
       const matchesStatus =
         statusFilter === "ALL" ||
@@ -144,7 +141,6 @@ function PartnersContent() {
       await loadPartners();
     } catch (err: any) {
       setDeletingPartner(null);
-      // Display server error clearly (e.g. 409 Conflict: Đối tác đã phát sinh giao dịch, không thể xóa.)
       setDeleteError(err.message || "Không thể xóa đối tác.");
     } finally {
       setIsDeleting(false);
@@ -152,196 +148,150 @@ function PartnersContent() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-7xl mx-auto">
       {/* Page Header with Tab Switcher */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border-subtle pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Users className="w-5 h-5 text-brand shrink-0" />
-            <h1 className="text-lg font-bold text-text-main">Quản lý Đối tác & Sổ Nợ</h1>
-          </div>
-          <p className="text-xs text-text-sub mt-0.5">
-            Theo dõi danh sách khách hàng, nhà cung cấp, hạn mức nợ và công nợ phát sinh
-          </p>
-        </div>
+      <PageHeader
+        title="Quản lý Đối tác & Sổ Nợ"
+        description="Theo dõi danh sách khách hàng, nhà cung cấp, hạn mức nợ và công nợ phát sinh."
+        badge={
+          <Badge variant="brand">
+            {activeTab === "SUPPLIER" ? `${supplierCount} nhà cung cấp` : `${customerCount} khách hàng`}
+          </Badge>
+        }
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Header Tab Switcher */}
+            <div className="inline-flex p-0.5 bg-surface-muted border border-border-default rounded-sm">
+              <button
+                type="button"
+                onClick={() => handleTabChange("SUPPLIER")}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded-sm transition-colors flex items-center gap-1.5",
+                  activeTab === "SUPPLIER"
+                    ? "bg-surface-card text-brand shadow-xs font-semibold"
+                    : "text-text-sub hover:text-text-main"
+                )}
+              >
+                <Truck className="w-3.5 h-3.5" />
+                <span>Nhà cung cấp</span>
+                <span className="text-[10px] font-mono tabular-nums opacity-80">
+                  ({supplierCount})
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTabChange("CUSTOMER")}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded-sm transition-colors flex items-center gap-1.5",
+                  activeTab === "CUSTOMER"
+                    ? "bg-surface-card text-brand shadow-xs font-semibold"
+                    : "text-text-sub hover:text-text-main"
+                )}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Khách hàng</span>
+                <span className="text-[10px] font-mono tabular-nums opacity-80">
+                  ({customerCount})
+                </span>
+              </button>
+            </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          {/* Header Tab Switcher */}
-          <div className="inline-flex p-0.5 bg-surface-app border border-border-default rounded-md">
-            <button
-              type="button"
-              onClick={() => handleTabChange("SUPPLIER")}
-              className={cn(
-                "px-3 py-1.5 text-xs font-medium rounded-sm transition-colors flex items-center gap-1.5",
-                activeTab === "SUPPLIER"
-                  ? "bg-brand text-white shadow-xs font-semibold"
-                  : "text-text-sub hover:text-text-main"
-              )}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={loadPartners}
+              disabled={isLoading}
+              title="Làm mới danh sách"
             >
-              <Truck className="w-3.5 h-3.5" />
-              Nhà cung cấp
-              <span className={cn(
-                "text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums",
-                activeTab === "SUPPLIER" ? "bg-white/20 text-white" : "bg-surface-muted text-text-sub"
-              )}>
-                {supplierCount}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleTabChange("CUSTOMER")}
-              className={cn(
-                "px-3 py-1.5 text-xs font-medium rounded-sm transition-colors flex items-center gap-1.5",
-                activeTab === "CUSTOMER"
-                  ? "bg-brand text-white shadow-xs font-semibold"
-                  : "text-text-sub hover:text-text-main"
-              )}
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isLoading ? "animate-spin text-brand" : ""}`} />
+              <span>Làm mới</span>
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleOpenCreate}
             >
-              <Users className="w-3.5 h-3.5" />
-              Khách hàng
-              <span className={cn(
-                "text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums",
-                activeTab === "CUSTOMER" ? "bg-white/20 text-white" : "bg-surface-muted text-text-sub"
-              )}>
-                {customerCount}
-              </span>
-            </button>
+              <Plus className="w-4 h-4 mr-1.5" />
+              <span>Thêm đối tác</span>
+            </Button>
           </div>
-
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={loadPartners}
-            disabled={isLoading}
-            title="Làm mới danh sách"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
-            Làm mới
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleOpenCreate}
-            className="shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            + Thêm đối tác
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Global Alerts / Feedback */}
       {feedback && (
-        <div
-          role="status"
-          className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-xs flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>{feedback.message}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setFeedback(null)}
-            className="p-0.5 text-emerald-600 hover:text-emerald-900 rounded-sm"
-            aria-label="Đóng thông báo"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <AlertBanner
+          type={feedback.type}
+          message={feedback.message}
+          onClose={() => setFeedback(null)}
+        />
       )}
 
       {deleteError && (
-        <div
-          role="alert"
-          className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-md text-xs flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            <div>
-              <span className="font-semibold">Không thể xóa đối tác: </span>
-              <span>{deleteError}</span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setDeleteError(null)}
-            className="p-0.5 text-rose-600 hover:text-rose-900 rounded-sm"
-            aria-label="Đóng cảnh báo lỗi"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <AlertBanner
+          type="error"
+          message={`Không thể xóa đối tác: ${deleteError}`}
+          onClose={() => setDeleteError(null)}
+        />
       )}
 
       {loadError && (
-        <div
-          role="alert"
-          className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-md text-xs flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            <span>{loadError}</span>
-          </div>
-          <Button variant="outline" size="sm" onClick={loadPartners}>
-            Thử lại
-          </Button>
-        </div>
+        <AlertBanner
+          type="error"
+          message={loadError}
+          onClose={() => setLoadError(null)}
+        />
       )}
 
       {/* Filter Toolbar */}
-      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between bg-surface-card border border-border-default rounded-md p-3">
-        <div className="w-full sm:w-80">
-          <Input
-            placeholder="Tìm theo tên, số điện thoại, địa chỉ..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            leftIcon={<Search className="w-4 h-4" />}
-          />
-        </div>
+      <TableToolbar
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Tìm theo tên, số điện thoại, địa chỉ..."
+        filters={
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-text-sub whitespace-nowrap">Trạng thái:</span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as "ALL" | "ACTIVE" | "INACTIVE")}
+              className="h-8 bg-surface-muted/50 border border-border-subtle rounded-sm px-2.5 text-xs text-text-main focus:outline-none focus:border-brand"
+            >
+              <option value="ALL">Tất cả trạng thái</option>
+              <option value="ACTIVE">Đang hoạt động</option>
+              <option value="INACTIVE">Ngừng hoạt động</option>
+            </select>
+          </div>
+        }
+      />
 
-        <div className="flex items-center gap-2 self-end sm:self-auto">
-          <label className="text-xs text-text-sub whitespace-nowrap">Trạng thái:</label>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as "ALL" | "ACTIVE" | "INACTIVE")}
-            className="h-9 bg-surface-card border border-border-default rounded-sm px-3 text-xs text-text-main focus:outline-none focus:border-border-focus focus:ring-1 focus:ring-border-focus transition-colors"
-          >
-            <option value="ALL">Tất cả trạng thái</option>
-            <option value="ACTIVE">Đang hoạt động</option>
-            <option value="INACTIVE">Ngừng hoạt động</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Table: compact density with row height ~38px, px-3 py-2 */}
+      {/* Table Section */}
       <div className="bg-surface-card border border-border-default rounded-md overflow-hidden shadow-card">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
-            <thead className="bg-surface-muted border-b border-border-default text-text-sub font-medium uppercase tracking-wider select-none">
+            <thead className="bg-surface-muted border-b border-border-default text-text-sub font-semibold uppercase tracking-wider select-none text-[11px]">
               <tr className="h-9">
-                <th className="px-3 py-2 font-medium">Tên đối tác</th>
-                <th className="px-3 py-2 font-medium">Số điện thoại</th>
-                <th className="px-3 py-2 font-medium">Địa chỉ</th>
-                <th className="px-3 py-2 font-medium text-right">Hạn mức nợ</th>
-                <th className="px-3 py-2 font-medium text-right">Dư nợ hiện tại</th>
-                <th className="px-3 py-2 font-medium text-center">Trạng thái</th>
-                <th className="px-3 py-2 font-medium text-right">Thao tác</th>
+                <th className="px-3 py-2">Tên đối tác</th>
+                <th className="px-3 py-2">Số điện thoại</th>
+                <th className="px-3 py-2">Địa chỉ</th>
+                <th className="px-3 py-2 text-right">Hạn mức nợ</th>
+                <th className="px-3 py-2 text-right">Dư nợ hiện tại</th>
+                <th className="px-3 py-2 text-center">Trạng thái</th>
+                <th className="px-3 py-2 text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-subtle text-text-main">
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-text-sub">
+                  <td colSpan={7} className="px-3 py-12 text-center text-text-sub">
                     <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-brand" />
-                    Đang tải danh sách đối tác...
+                    <span>Đang tải danh sách đối tác...</span>
                   </td>
                 </tr>
               ) : filteredPartners.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-text-sub">
-                    <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                    Không tìm thấy đối tác nào phù hợp.
+                  <td colSpan={7} className="px-3 py-12 text-center text-text-sub">
+                    <Users className="w-7 h-7 mx-auto mb-2 text-text-disabled" />
+                    <span>Không tìm thấy đối tác nào phù hợp.</span>
                   </td>
                 </tr>
               ) : (
@@ -376,15 +326,13 @@ function PartnersContent() {
                       <td className="px-3 py-2 font-mono tabular-nums text-right text-text-main">
                         {formatVND(partner.credit_limit || 0)}
                       </td>
-                      <td className="px-3 py-2 font-mono tabular-nums text-right text-outflow">
+                      <td className="px-3 py-2 font-mono tabular-nums text-right text-outflow font-semibold">
                         {formatVND(debtNumber)}
                       </td>
                       <td className="px-3 py-2 text-center">
-                        {partner.is_active !== false ? (
-                          <Badge variant="brand">Hoạt động</Badge>
-                        ) : (
-                          <Badge variant="default">Ngừng</Badge>
-                        )}
+                        <Badge variant={partner.is_active !== false ? "brand" : "default"}>
+                          {partner.is_active !== false ? "Hoạt động" : "Ngừng"}
+                        </Badge>
                       </td>
                       <td className="px-3 py-2 text-right">
                         <div className="inline-flex items-center justify-end gap-1">
@@ -444,14 +392,7 @@ function PartnersContent() {
 
 export default function PartnersPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex items-center justify-center py-12 text-xs text-text-sub">
-          <RefreshCw className="w-4 h-4 animate-spin mr-2 text-brand" />
-          Đang tải trang đối tác...
-        </div>
-      }
-    >
+    <Suspense fallback={<div className="p-8 text-center text-xs text-text-sub">Đang tải...</div>}>
       <PartnersContent />
     </Suspense>
   );

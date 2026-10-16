@@ -2,21 +2,21 @@
 
 import React, { useEffect, useState, useMemo } from "react";
 import { api, Category, Product } from "@/lib/api";
-import { Button } from "@/components/common/Button";
-import { Input } from "@/components/common/Input";
-import { Badge } from "@/components/common/Badge";
-import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import {
+  PageHeader,
+  Button,
+  Badge,
+  ConfirmDialog,
+  TableToolbar,
+  AlertBanner,
+} from "@/components/common";
 import { CategoryFormModal } from "@/components/categories/CategoryFormModal";
 import {
-  FolderTree,
   Plus,
-  Search,
   Pencil,
   Trash2,
   RefreshCw,
-  AlertCircle,
-  CheckCircle2,
-  X,
+  FolderTree,
 } from "lucide-react";
 
 // ponytail: in-memory product count and filtering; upgrade to server-side search and count aggregation when category count exceeds 500 items.
@@ -61,7 +61,6 @@ export default function CategoriesPage() {
     loadData();
   }, []);
 
-  // Map category ID to Category object for fast lookup of parent name
   const categoryMap = useMemo(() => {
     const map = new Map<string, Category>();
     categories.forEach((cat) => {
@@ -70,7 +69,6 @@ export default function CategoriesPage() {
     return map;
   }, [categories]);
 
-  // Count products directly assigned to each category
   const productCountMap = useMemo(() => {
     const counts: Record<string, number> = {};
     products.forEach((prod) => {
@@ -81,7 +79,6 @@ export default function CategoriesPage() {
     return counts;
   }, [products]);
 
-  // Filtered categories
   const filteredCategories = useMemo(() => {
     return categories.filter((cat) => {
       const search = searchTerm.trim().toLowerCase();
@@ -136,7 +133,6 @@ export default function CategoriesPage() {
       await loadData();
     } catch (err: any) {
       setDeletingCategory(null);
-      // Display server error clearly (e.g. 409 Conflict: Danh mục đang chứa sản phẩm hoặc danh mục con, không thể xóa.)
       setDeleteError(err.message || "Không thể xóa danh mục.");
     } finally {
       setIsDeleting(false);
@@ -144,150 +140,108 @@ export default function CategoriesPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-7xl mx-auto">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border-subtle pb-4">
-        <div>
+      <PageHeader
+        title="Quản lý Danh mục Sản phẩm"
+        description="Thiết lập danh mục phân cấp cho hàng hóa, nguyên vật liệu và phân bổ tồn kho."
+        badge={
+          <Badge variant="brand">
+            {categories.length} danh mục
+          </Badge>
+        }
+        actions={
           <div className="flex items-center gap-2">
-            <FolderTree className="w-5 h-5 text-brand shrink-0" />
-            <h1 className="text-lg font-bold text-text-main">Quản lý Danh mục Sản phẩm</h1>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={loadData}
+              disabled={isLoading}
+              title="Làm mới danh sách"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isLoading ? "animate-spin text-brand" : ""}`} />
+              <span>Làm mới</span>
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleOpenCreate}
+            >
+              <Plus className="w-4 h-4 mr-1.5" />
+              <span>Thêm danh mục</span>
+            </Button>
           </div>
-          <p className="text-xs text-text-sub mt-0.5">
-            Thiết lập danh mục phân cấp cho hàng hóa, nguyên vật liệu và báo cáo doanh thu
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={loadData}
-            disabled={isLoading}
-            title="Làm mới danh sách"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
-            Làm mới
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleOpenCreate}
-            className="shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Thêm danh mục
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Global Alerts / Feedback */}
       {feedback && (
-        <div
-          role="status"
-          className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-xs flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>{feedback.message}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setFeedback(null)}
-            className="p-0.5 text-emerald-600 hover:text-emerald-900 rounded-sm"
-            aria-label="Đóng thông báo"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <AlertBanner
+          type={feedback.type}
+          message={feedback.message}
+          onClose={() => setFeedback(null)}
+        />
       )}
 
       {deleteError && (
-        <div
-          role="alert"
-          className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-md text-xs flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            <div>
-              <span className="font-semibold">Không thể xóa: </span>
-              <span>{deleteError}</span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setDeleteError(null)}
-            className="p-0.5 text-rose-600 hover:text-rose-900 rounded-sm"
-            aria-label="Đóng cảnh báo lỗi"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <AlertBanner
+          type="error"
+          message={`Không thể xóa: ${deleteError}`}
+          onClose={() => setDeleteError(null)}
+        />
       )}
 
       {loadError && (
-        <div
-          role="alert"
-          className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-md text-xs flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            <span>{loadError}</span>
-          </div>
-          <Button variant="outline" size="sm" onClick={loadData}>
-            Thử lại
-          </Button>
-        </div>
+        <AlertBanner
+          type="error"
+          message={loadError}
+          onClose={() => setLoadError(null)}
+        />
       )}
 
       {/* Search & Filter Bar */}
-      <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between">
-        <div className="w-full sm:w-80">
-          <Input
-            placeholder="Tìm theo mã hoặc tên danh mục..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            leftIcon={<Search className="w-4 h-4 text-text-sub" />}
-            className="h-8 text-xs"
-          />
-        </div>
-
-        {/* Status Filter Segmented Controls */}
-        <div className="inline-flex items-center p-0.5 bg-surface-muted border border-border-default rounded-md text-xs">
-          <button
-            type="button"
-            onClick={() => setStatusFilter("ALL")}
-            className={`px-3 py-1 font-medium rounded-sm transition-colors ${
-              statusFilter === "ALL"
-                ? "bg-surface-card text-text-main shadow-xs"
-                : "text-text-sub hover:text-text-main"
-            }`}
-          >
-            Tất cả ({categories.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatusFilter("ACTIVE")}
-            className={`px-3 py-1 font-medium rounded-sm transition-colors ${
-              statusFilter === "ACTIVE"
-                ? "bg-surface-card text-text-main shadow-xs"
-                : "text-text-sub hover:text-text-main"
-            }`}
-          >
-            Đang dùng ({categories.filter((c) => c.is_active !== false).length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatusFilter("INACTIVE")}
-            className={`px-3 py-1 font-medium rounded-sm transition-colors ${
-              statusFilter === "INACTIVE"
-                ? "bg-surface-card text-text-main shadow-xs"
-                : "text-text-sub hover:text-text-main"
-            }`}
-          >
-            Vô hiệu ({categories.filter((c) => c.is_active === false).length})
-          </button>
-        </div>
-      </div>
+      <TableToolbar
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Tìm theo mã hoặc tên danh mục..."
+        actions={
+          <div className="inline-flex items-center p-0.5 bg-surface-muted border border-border-default rounded-sm text-xs">
+            <button
+              type="button"
+              onClick={() => setStatusFilter("ALL")}
+              className={`px-2.5 py-1 font-medium rounded-sm transition-colors ${
+                statusFilter === "ALL"
+                  ? "bg-surface-card text-text-main shadow-xs"
+                  : "text-text-sub hover:text-text-main"
+              }`}
+            >
+              Tất cả ({categories.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("ACTIVE")}
+              className={`px-2.5 py-1 font-medium rounded-sm transition-colors ${
+                statusFilter === "ACTIVE"
+                  ? "bg-surface-card text-text-main shadow-xs"
+                  : "text-text-sub hover:text-text-main"
+              }`}
+            >
+              Đang dùng ({categories.filter((c) => c.is_active !== false).length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("INACTIVE")}
+              className={`px-2.5 py-1 font-medium rounded-sm transition-colors ${
+                statusFilter === "INACTIVE"
+                  ? "bg-surface-card text-text-main shadow-xs"
+                  : "text-text-sub hover:text-text-main"
+              }`}
+            >
+              Vô hiệu ({categories.filter((c) => c.is_active === false).length})
+            </button>
+          </div>
+        }
+      />
 
       {/* Table Section */}
       <div className="bg-surface-card border border-border-default rounded-md overflow-hidden shadow-card">
@@ -317,9 +271,9 @@ export default function CategoriesPage() {
                     <FolderTree className="w-7 h-7 mx-auto mb-2 text-text-disabled" />
                     {categories.length === 0 ? (
                       <div>
-                        <p className="font-medium text-text-main">Chưa có danh mục nào</p>
+                        <p className="font-semibold text-text-main">Chưa có danh mục nào</p>
                         <p className="text-xs text-text-sub mt-0.5">
-                          Nhấn nút &quot;+ Thêm danh mục&quot; để tạo danh mục đầu tiên.
+                          Nhấn nút &quot;Thêm danh mục&quot; để tạo danh mục đầu tiên.
                         </p>
                       </div>
                     ) : (
@@ -393,31 +347,31 @@ export default function CategoriesPage() {
             </tbody>
           </table>
         </div>
-
-        {/* Footer Row with Count */}
-        {!isLoading && filteredCategories.length > 0 && (
-          <div className="px-3 py-2 bg-surface-muted border-t border-border-subtle flex items-center justify-between text-xs text-text-sub">
-            <span>
-              Hiển thị <span className="font-mono font-medium text-text-main">{filteredCategories.length}</span> / {categories.length} danh mục
-            </span>
-          </div>
-        )}
       </div>
 
-      {/* Create / Edit Modal */}
+      {/* Form Modal */}
       <CategoryFormModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        onSuccess={loadData}
         category={editingCategory}
         categories={categories}
+        onSuccess={async () => {
+          setIsModalOpen(false);
+          setFeedback({
+            type: "success",
+            message: editingCategory
+              ? `Đã cập nhật danh mục "${editingCategory.name}" thành công.`
+              : "Đã tạo danh mục mới thành công.",
+          });
+          await loadData();
+        }}
       />
 
-      {/* Delete Confirmation Dialog */}
+      {/* Confirm Deletion Dialog */}
       <ConfirmDialog
         isOpen={!!deletingCategory}
-        title="Xóa danh mục sản phẩm"
-        description={`Bạn có chắc chắn muốn xóa danh mục "${deletingCategory?.name}" (${deletingCategory?.code})? Hành động này không thể hoàn tác.`}
+        title="Xác nhận xóa danh mục"
+        description={`Bạn có chắc muốn xóa danh mục "${deletingCategory?.name}"? Hệ thống sẽ chặn xóa nếu danh mục đang chứa sản phẩm hoặc có danh mục con.`}
         confirmLabel="Xóa danh mục"
         cancelLabel="Hủy"
         variant="danger"

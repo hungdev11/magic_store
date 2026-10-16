@@ -3,7 +3,8 @@
 import React from "react";
 import Link from "next/link";
 import { useStoreProfile } from "@/lib/store";
-import { MODULE_DEFINITIONS, formatVND, formatQty, getBadgeClasses } from "@/lib/design-tokens";
+import { MODULE_DEFINITIONS } from "@/lib/design-tokens";
+import { PageHeader, Badge, Button } from "@/components/common";
 import {
   Package,
   ArrowDownToLine,
@@ -11,201 +12,219 @@ import {
   Trash2,
   Settings,
   PlusCircle,
-  Sparkles,
   ArrowRight,
-  ShieldCheck,
-  Zap,
+  ShoppingCart,
+  Boxes,
+  Truck,
+  Users,
 } from "lucide-react";
 
+interface OperationItem {
+  title: string;
+  desc: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  badge?: string;
+  condition?: boolean;
+}
+
+interface OperationGroup {
+  group: string;
+  items: OperationItem[];
+}
+
+// ponytail: static action grid grouped by operations; upgrade to dynamic dashboard widgets if analytics metrics added.
 export default function DashboardPage() {
   const { storeSetting, enabledModules } = useStoreProfile();
 
   const activeModuleKeys = Object.keys(enabledModules).filter((k) => enabledModules[k]);
 
-  const quickActions = [
+  const operations: OperationGroup[] = [
     {
-      title: "Thêm sản phẩm mới",
-      desc: "Tạo sản phẩm với ma trận, cân ký hoặc BOM",
-      href: "/products/new",
-      icon: PlusCircle,
-      accent: "text-brand",
-      bg: "bg-emerald-50",
+      group: "Bán hàng & Quầy thu ngân",
+      items: [
+        {
+          title: "Bán hàng POS",
+          desc: "Giao diện thu ngân nhanh, cân ký, trừ nguyên liệu và tính nợ",
+          href: "/pos",
+          icon: ShoppingCart,
+          badge: "F8",
+        },
+      ],
     },
     {
-      title: "Danh sách hàng hóa",
-      desc: "Xem tồn kho thực tế, bảng giá vốn WAC",
-      href: "/products",
-      icon: Package,
-      accent: "text-sky-600",
-      bg: "bg-sky-50",
+      group: "Kho & Hàng hóa",
+      items: [
+        {
+          title: "Thêm sản phẩm mới",
+          desc: "Tạo sản phẩm với ma trận màu size, cân ký hoặc định mức BOM",
+          href: "/products/new",
+          icon: PlusCircle,
+        },
+        {
+          title: "Danh sách sản phẩm",
+          desc: "Tra cứu tồn kho thực tế, bảng giá bán và giá vốn WAC",
+          href: "/products",
+          icon: Package,
+        },
+        {
+          title: "Nhập hàng nhà cung cấp",
+          desc: "Lập phiếu nhập kho PO, phân bổ theo lô và hạn dùng",
+          href: "/inventory/purchase",
+          icon: ArrowDownToLine,
+        },
+        {
+          title: "Quản lý Lô & HSD",
+          desc: "Theo dõi số lô, cảnh báo cận date và truy vết luân chuyển",
+          href: "/inventory/batches",
+          icon: Boxes,
+        },
+        {
+          title: "Xuất hủy & Hao hụt",
+          desc: "Ghi nhận cá ngộp, hàng hỏng và hạch toán tổn thất vốn",
+          href: "/inventory/wastage",
+          icon: Trash2,
+        },
+      ],
     },
     {
-      title: "Nhập hàng nhà cung cấp",
-      desc: "Tạo phiếu nhập kho PO, phân bổ theo lô",
-      href: "/inventory/purchase",
-      icon: ArrowDownToLine,
-      accent: "text-indigo-600",
-      bg: "bg-indigo-50",
-    },
-    {
-      title: "Chế biến & Định mức BOM",
-      desc: "Nấu mẻ thành phẩm hoặc mổ xẻ phân rã",
-      href: "/production",
-      icon: Factory,
-      accent: "text-purple-600",
-      bg: "bg-purple-50",
-      condition: enabledModules["bom_production"],
-    },
-    {
-      title: "Hủy hàng & Hao hụt",
-      desc: "Ghi nhận hỏng hóc, tính tổn thất vốn",
-      href: "/inventory/wastage",
-      icon: Trash2,
-      accent: "text-rose-600",
-      bg: "bg-rose-50",
-    },
-    {
-      title: "Cấu hình mô-đun",
-      desc: "Chuyển nhanh mẫu ngành hoặc bật/tắt tính năng",
-      href: "/settings",
-      icon: Settings,
-      accent: "text-amber-600",
-      bg: "bg-amber-50",
+      group: "Đối tác & Chế biến",
+      items: [
+        {
+          title: "Định mức & Chế biến BOM",
+          desc: "Nấu mẻ thành phẩm hoặc pha lóc mổ xẻ nguyên liệu",
+          href: "/production",
+          icon: Factory,
+          condition: enabledModules["bom_production"],
+        },
+        {
+          title: "Nhà cung cấp",
+          desc: "Quản lý danh sách đối tác cung ứng và công nợ phải trả",
+          href: "/partners?type=SUPPLIER",
+          icon: Truck,
+        },
+        {
+          title: "Khách hàng",
+          desc: "Quản lý khách quen, hạn mức nợ và sổ nợ",
+          href: "/partners?type=CUSTOMER",
+          icon: Users,
+        },
+      ],
     },
   ];
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Welcome & Store Overview Card */}
-      <div className="bg-surface-card rounded-xl p-6 border border-border-subtle shadow-card flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
+      {/* Header with Title and Settings Action */}
+      <PageHeader
+        title={storeSetting?.name || "Magic Store"}
+        description="Hệ thống Micro-ERP tự thích ứng theo ngành hàng với tính toán giá vốn bình quân (WAC)."
+        badge={
+          <Badge variant="brand">
+            WAC · {storeSetting?.currency || "VND"}
+          </Badge>
+        }
+        actions={
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-brand px-2 py-0.5 rounded bg-brand-light border border-emerald-200">
-              Hệ thống vận hành
-            </span>
-            <span className="text-xs text-text-sub font-mono">Phiên bản 1.0</span>
+            <Link href="/pos">
+              <Button variant="primary" size="sm">
+                <ShoppingCart className="w-4 h-4 mr-1.5" />
+                <span>Bán hàng POS (F8)</span>
+              </Button>
+            </Link>
+            <Link href="/settings">
+              <Button variant="secondary" size="sm">
+                <Settings className="w-4 h-4 mr-1.5" />
+                <span>Cấu hình mô-đun</span>
+              </Button>
+            </Link>
           </div>
-          <h2 className="text-2xl font-bold text-text-main mt-1">
-            {storeSetting?.name || "Cửa Hàng Đa Ngành"}
-          </h2>
-          <p className="text-sm text-text-sub mt-1">
-            Hệ thống Micro-ERP tự thích ứng theo ngành hàng với tính toán giá vốn bình quân (WAC).
-          </p>
-        </div>
+        }
+      />
 
-        <Link
-          href="/settings"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand-hover transition shadow-sm"
-        >
-          <Settings className="w-4 h-4" />
-          <span>Tùy chỉnh Mô-đun</span>
-        </Link>
-      </div>
-
-      {/* Feature Flags Active Status Chips */}
-      <div className="bg-surface-card rounded-xl p-5 border border-border-subtle shadow-card space-y-3">
+      {/* Feature Flags Active Status */}
+      <div className="bg-surface-card rounded-md p-4 border border-border-subtle shadow-card space-y-3">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-brand" />
-            <h3 className="text-sm font-semibold text-text-main">
-              Trạng thái Cờ Tính năng (Feature Flags)
-            </h3>
-          </div>
-          <span className="text-xs text-text-sub">
-            {activeModuleKeys.length} / {Object.keys(MODULE_DEFINITIONS).length} mô-đun kích hoạt
+          <h2 className="text-sm font-semibold text-text-main">
+            Trạng thái Mô-đun Ngành hàng
+          </h2>
+          <span className="text-xs text-text-sub tabular-nums font-mono">
+            {activeModuleKeys.length} / {Object.keys(MODULE_DEFINITIONS).length} kích hoạt
           </span>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           {Object.entries(MODULE_DEFINITIONS).map(([key, def]) => {
             const isEnabled = !!enabledModules[key];
             return (
-              <div
+              <Badge
                 key={key}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition ${
-                  isEnabled
-                    ? `${getBadgeClasses(def.badgeVariant)} border-current font-medium`
-                    : "bg-surface-muted text-text-disabled border-border-subtle"
-                }`}
+                variant={isEnabled ? def.badgeVariant : "default"}
+                className={!isEnabled ? "opacity-40" : ""}
               >
                 <span
-                  className={`w-2 h-2 rounded-full ${
+                  className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
                     isEnabled ? "bg-current" : "bg-text-disabled"
                   }`}
                 />
-                <span className="font-medium">{def.label}</span>
-                <span className="text-[10px] opacity-75">
-                  ({isEnabled ? "Bật" : "Tắt"})
-                </span>
+                {def.label}
+              </Badge>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Structured Operational Workflow Groups */}
+      <div className="space-y-5">
+        {operations.map((group) => {
+          const visibleItems = group.items.filter((item) => item.condition !== false);
+          if (visibleItems.length === 0) return null;
+
+          return (
+            <div key={group.group} className="space-y-2.5">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-text-sub">
+                {group.group}
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {visibleItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className="group bg-surface-card p-4 rounded-md border border-border-subtle hover:border-brand/40 hover:shadow-card transition-all flex flex-col justify-between"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-sm bg-surface-muted text-text-main group-hover:bg-brand-light group-hover:text-brand transition-colors shrink-0">
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-1">
+                            <h4 className="font-semibold text-sm text-text-main group-hover:text-brand transition-colors truncate">
+                              {item.title}
+                            </h4>
+                            {item.badge && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-sm bg-brand-light text-brand font-semibold shrink-0">
+                                {item.badge}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-text-sub mt-1 line-clamp-2 leading-relaxed">
+                            {item.desc}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-2.5 border-t border-border-subtle flex items-center justify-end text-xs font-medium text-text-sub group-hover:text-brand transition-colors">
+                        <span>Truy cập</span>
+                        <ArrowRight className="w-3.5 h-3.5 ml-1 transition-transform group-hover:translate-x-0.5" />
+                      </div>
+                    </Link>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Quick Action Navigation Grid */}
-      <div>
-        <h3 className="text-base font-semibold text-text-main mb-3 flex items-center gap-2">
-          <Zap className="w-4 h-4 text-brand" />
-          <span>Lối tắt tác nghiệp</span>
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {quickActions.map((action) => {
-            if (action.condition === false) return null;
-            const Icon = action.icon;
-            return (
-              <Link
-                key={action.href}
-                href={action.href}
-                className="group bg-surface-card p-5 rounded-xl border border-border-subtle hover:border-brand/40 hover:shadow-card transition flex flex-col justify-between"
-              >
-                <div className="flex items-start gap-3">
-                  <div className={`p-2.5 rounded-lg ${action.bg} ${action.accent}`}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-sm text-text-main group-hover:text-brand transition">
-                      {action.title}
-                    </h4>
-                    <p className="text-xs text-text-sub mt-1 leading-relaxed">
-                      {action.desc}
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-4 pt-3 border-t border-border-subtle flex items-center justify-end text-xs font-medium text-text-sub group-hover:text-brand">
-                  <span>Mở phân hệ</span>
-                  <ArrowRight className="w-3.5 h-3.5 ml-1 transition-transform group-hover:translate-x-1" />
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Design Token Preview / Self-Check Metric Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-surface-card p-4 rounded-xl border border-border-subtle shadow-card">
-          <div className="text-xs text-text-sub">Quy chuẩn tiền tệ (VND)</div>
-          <div className="text-xl font-bold text-inflow mt-1">
-            {formatVND(1850000)}
-          </div>
-          <div className="text-[11px] text-text-sub mt-0.5">Hạch toán chuẩn đơn vị VNĐ</div>
-        </div>
-        <div className="bg-surface-card p-4 rounded-xl border border-border-subtle shadow-card">
-          <div className="text-xs text-text-sub">Quy chuẩn định lượng (UOM)</div>
-          <div className="text-xl font-bold text-text-main mt-1">
-            {formatQty(12.45, "kg")}
-          </div>
-          <div className="text-[11px] text-text-sub mt-0.5">Hỗ trợ số lẻ 3 chữ số thập phân</div>
-        </div>
-        <div className="bg-surface-card p-4 rounded-xl border border-border-subtle shadow-card">
-          <div className="text-xs text-text-sub">Chuẩn bảo toàn dữ liệu</div>
-          <div className="text-xl font-bold text-brand mt-1 flex items-center gap-1.5">
-            <ShieldCheck className="w-5 h-5" />
-            <span>Chống âm kho</span>
-          </div>
-          <div className="text-[11px] text-text-sub mt-0.5">Kiểm tra số dư trước khi xuất</div>
-        </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

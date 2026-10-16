@@ -63,6 +63,8 @@ func NewServer(
 	mux.HandleFunc("DELETE /api/partners/{id}", s.handleDeletePartner)
 
 	// Inventory
+	mux.HandleFunc("GET /api/inventory/receipts", s.handleGetReceipts)
+	mux.HandleFunc("GET /api/inventory/receipts/{id}", s.handleGetReceiptDetail)
 	mux.HandleFunc("POST /api/inventory/purchase", s.handlePurchaseReceiving)
 	mux.HandleFunc("POST /api/inventory/wastage", s.handleWastage)
 

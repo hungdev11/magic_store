@@ -2,21 +2,21 @@
 
 import React, { useEffect, useState, useMemo } from "react";
 import { api, Unit } from "@/lib/api";
-import { Button } from "@/components/common/Button";
-import { Input } from "@/components/common/Input";
-import { Badge } from "@/components/common/Badge";
-import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import {
+  PageHeader,
+  Button,
+  Badge,
+  ConfirmDialog,
+  TableToolbar,
+  AlertBanner,
+} from "@/components/common";
 import { UnitFormModal } from "@/components/units/UnitFormModal";
 import {
-  Scale,
   Plus,
-  Search,
   Pencil,
   Trash2,
   RefreshCw,
-  AlertCircle,
-  CheckCircle2,
-  X,
+  Scale,
 } from "lucide-react";
 
 // ponytail: table pagination omitted; upgrade to server-side cursor pagination when unit catalog exceeds 500 items.
@@ -105,7 +105,6 @@ export default function UnitsPage() {
       await loadUnits();
     } catch (err: any) {
       setDeletingUnit(null);
-      // Show backend error clearly (e.g. 409 Conflict: Đơn vị đang được sử dụng ở sản phẩm hoặc bảng quy đổi)
       setDeleteError(err.message || "Không thể xóa đơn vị tính.");
     } finally {
       setIsDeleting(false);
@@ -113,150 +112,108 @@ export default function UnitsPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-7xl mx-auto">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border-subtle pb-4">
-        <div>
+      <PageHeader
+        title="Quản lý Đơn vị tính"
+        description="Danh mục đơn vị đo lường cơ sở và quy đổi cho sản phẩm, nguyên vật liệu và kiểm kê."
+        badge={
+          <Badge variant="brand">
+            {units.length} đơn vị
+          </Badge>
+        }
+        actions={
           <div className="flex items-center gap-2">
-            <Scale className="w-5 h-5 text-brand shrink-0" />
-            <h1 className="text-lg font-bold text-text-main">Quản lý Đơn vị tính</h1>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={loadUnits}
+              disabled={isLoading}
+              title="Làm mới danh sách"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isLoading ? "animate-spin text-brand" : ""}`} />
+              <span>Làm mới</span>
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleOpenCreate}
+            >
+              <Plus className="w-4 h-4 mr-1.5" />
+              <span>Thêm đơn vị tính</span>
+            </Button>
           </div>
-          <p className="text-xs text-text-sub mt-0.5">
-            Danh mục đơn vị đo lường cơ sở và quy đổi cho sản phẩm, nguyên vật liệu
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={loadUnits}
-            disabled={isLoading}
-            title="Làm mới danh sách"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
-            Làm mới
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleOpenCreate}
-            className="shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Thêm đơn vị tính
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Global Alerts / Feedback */}
       {feedback && (
-        <div
-          role="status"
-          className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-xs flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>{feedback.message}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setFeedback(null)}
-            className="p-0.5 text-emerald-600 hover:text-emerald-900 rounded-sm"
-            aria-label="Đóng thông báo"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <AlertBanner
+          type={feedback.type}
+          message={feedback.message}
+          onClose={() => setFeedback(null)}
+        />
       )}
 
       {deleteError && (
-        <div
-          role="alert"
-          className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-md text-xs flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            <div>
-              <span className="font-semibold">Không thể xóa: </span>
-              <span>{deleteError}</span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setDeleteError(null)}
-            className="p-0.5 text-rose-600 hover:text-rose-900 rounded-sm"
-            aria-label="Đóng cảnh báo lỗi"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <AlertBanner
+          type="error"
+          message={`Không thể xóa: ${deleteError}`}
+          onClose={() => setDeleteError(null)}
+        />
       )}
 
       {loadError && (
-        <div
-          role="alert"
-          className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-md text-xs flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            <span>{loadError}</span>
-          </div>
-          <Button variant="outline" size="sm" onClick={loadUnits}>
-            Thử lại
-          </Button>
-        </div>
+        <AlertBanner
+          type="error"
+          message={loadError}
+          onClose={() => setLoadError(null)}
+        />
       )}
 
       {/* Search & Filter Bar */}
-      <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between">
-        <div className="w-full sm:w-80">
-          <Input
-            placeholder="Tìm theo mã, tên hoặc mô tả..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            leftIcon={<Search className="w-4 h-4 text-text-sub" />}
-            className="h-8 text-xs"
-          />
-        </div>
-
-        {/* Status Filter Segmented Controls */}
-        <div className="inline-flex items-center p-0.5 bg-surface-muted border border-border-default rounded-md text-xs">
-          <button
-            type="button"
-            onClick={() => setStatusFilter("ALL")}
-            className={`px-3 py-1 font-medium rounded-sm transition-colors ${
-              statusFilter === "ALL"
-                ? "bg-surface-card text-text-main shadow-xs"
-                : "text-text-sub hover:text-text-main"
-            }`}
-          >
-            Tất cả ({units.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatusFilter("ACTIVE")}
-            className={`px-3 py-1 font-medium rounded-sm transition-colors ${
-              statusFilter === "ACTIVE"
-                ? "bg-surface-card text-text-main shadow-xs"
-                : "text-text-sub hover:text-text-main"
-            }`}
-          >
-            Đang dùng ({units.filter((u) => u.is_active).length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatusFilter("INACTIVE")}
-            className={`px-3 py-1 font-medium rounded-sm transition-colors ${
-              statusFilter === "INACTIVE"
-                ? "bg-surface-card text-text-main shadow-xs"
-                : "text-text-sub hover:text-text-main"
-            }`}
-          >
-            Vô hiệu ({units.filter((u) => !u.is_active).length})
-          </button>
-        </div>
-      </div>
+      <TableToolbar
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Tìm theo mã, tên hoặc mô tả..."
+        actions={
+          <div className="inline-flex items-center p-0.5 bg-surface-muted border border-border-default rounded-sm text-xs">
+            <button
+              type="button"
+              onClick={() => setStatusFilter("ALL")}
+              className={`px-2.5 py-1 font-medium rounded-sm transition-colors ${
+                statusFilter === "ALL"
+                  ? "bg-surface-card text-text-main shadow-xs"
+                  : "text-text-sub hover:text-text-main"
+              }`}
+            >
+              Tất cả ({units.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("ACTIVE")}
+              className={`px-2.5 py-1 font-medium rounded-sm transition-colors ${
+                statusFilter === "ACTIVE"
+                  ? "bg-surface-card text-text-main shadow-xs"
+                  : "text-text-sub hover:text-text-main"
+              }`}
+            >
+              Đang dùng ({units.filter((u) => u.is_active).length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("INACTIVE")}
+              className={`px-2.5 py-1 font-medium rounded-sm transition-colors ${
+                statusFilter === "INACTIVE"
+                  ? "bg-surface-card text-text-main shadow-xs"
+                  : "text-text-sub hover:text-text-main"
+              }`}
+            >
+              Vô hiệu ({units.filter((u) => !u.is_active).length})
+            </button>
+          </div>
+        }
+      />
 
       {/* Table Section */}
       <div className="bg-surface-card border border-border-default rounded-md overflow-hidden shadow-card">
@@ -285,9 +242,9 @@ export default function UnitsPage() {
                     <Scale className="w-7 h-7 mx-auto mb-2 text-text-disabled" />
                     {units.length === 0 ? (
                       <div>
-                        <p className="font-medium text-text-main">Chưa có đơn vị tính nào</p>
+                        <p className="font-semibold text-text-main">Chưa có đơn vị tính nào</p>
                         <p className="text-xs text-text-sub mt-0.5">
-                          Nhấn nút "+ Thêm đơn vị tính" để bắt đầu thiết lập danh mục.
+                          Nhấn nút &quot;Thêm đơn vị tính&quot; để bắt đầu thiết lập danh mục.
                         </p>
                       </div>
                     ) : (
@@ -345,56 +302,36 @@ export default function UnitsPage() {
             </tbody>
           </table>
         </div>
-
-        {/* Footer Row with Count */}
-        {!isLoading && filteredUnits.length > 0 && (
-          <div className="px-3 py-2 bg-surface-muted border-t border-border-subtle flex items-center justify-between text-xs text-text-sub">
-            <span>
-              Hiển thị <span className="font-mono font-medium text-text-main">{filteredUnits.length}</span> / {units.length} đơn vị tính
-            </span>
-          </div>
-        )}
       </div>
 
-      {/* Create/Edit Modal */}
+      {/* Form Modal */}
       <UnitFormModal
         isOpen={isModalOpen}
-        onClose={() => {
+        onClose={() => setIsModalOpen(false)}
+        unit={editingUnit}
+        onSuccess={async () => {
           setIsModalOpen(false);
-          setEditingUnit(null);
-        }}
-        onSuccess={() => {
           setFeedback({
             type: "success",
             message: editingUnit
-              ? `Đã cập nhật đơn vị tính "${editingUnit.name}".`
-              : "Đã thêm đơn vị tính mới thành công.",
+              ? `Đã cập nhật đơn vị tính "${editingUnit.name}" thành công.`
+              : "Đã tạo đơn vị tính mới thành công.",
           });
-          loadUnits();
+          await loadUnits();
         }}
-        unit={editingUnit}
       />
 
-      {/* Delete Confirmation Dialog */}
+      {/* Confirm Deletion Dialog */}
       <ConfirmDialog
         isOpen={!!deletingUnit}
-        title="Xóa đơn vị tính"
-        description={
-          deletingUnit
-            ? `Bạn có chắc chắn muốn xóa đơn vị tính "${deletingUnit.name}" (${deletingUnit.code})? Hành động này không thể hoàn tác.`
-            : ""
-        }
-        confirmLabel="Xóa đơn vị"
+        title="Xác nhận xóa đơn vị tính"
+        description={`Bạn có chắc muốn xóa đơn vị tính "${deletingUnit?.name}" (${deletingUnit?.code})? Hệ thống sẽ chặn xóa nếu đơn vị này đang được liên kết với sản phẩm hoặc bảng quy đổi.`}
+        confirmLabel="Xóa đơn vị tính"
         cancelLabel="Hủy"
         variant="danger"
         isLoading={isDeleting}
         onConfirm={handleConfirmDelete}
-        onCancel={() => {
-          if (!isDeleting) {
-            setDeletingUnit(null);
-            setDeleteError(null);
-          }
-        }}
+        onCancel={() => setDeletingUnit(null)}
       />
     </div>
   );

@@ -6,6 +6,7 @@ import { Button } from "@/components/common/Button";
 import { Input } from "@/components/common/Input";
 import { SearchableSelect, SelectOption } from "@/components/common/SearchableSelect";
 import { api, Category } from "@/lib/api";
+import { slugify } from "@/lib/matrix-utils";
 import { AlertCircle } from "lucide-react";
 
 export interface CategoryFormModalProps {
@@ -16,7 +17,6 @@ export interface CategoryFormModalProps {
   categories: Category[];
 }
 
-// ponytail: in-memory tree traversal for descendant exclusion; upgrade to nested set or ltree queries if category tree exceeds 10,000 nodes.
 export const CategoryFormModal: React.FC<CategoryFormModalProps> = ({
   isOpen,
   onClose,
@@ -26,6 +26,7 @@ export const CategoryFormModal: React.FC<CategoryFormModalProps> = ({
 }) => {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
+  const [isCodeCustomized, setIsCodeCustomized] = useState(false);
   const [parentId, setParentId] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -40,15 +41,24 @@ export const CategoryFormModal: React.FC<CategoryFormModalProps> = ({
         setName(category.name || "");
         setParentId(category.parent_id || "");
         setIsActive(category.is_active ?? true);
+        setIsCodeCustomized(true);
       } else {
         setCode("");
         setName("");
+        setIsCodeCustomized(false);
         setParentId("");
         setIsActive(true);
       }
       setError(null);
     }
   }, [isOpen, category]);
+
+  const handleNameChange = (val: string) => {
+    setName(val);
+    if (!isCodeCustomized && !isEdit) {
+      setCode(slugify(val));
+    }
+  };
 
   // Compute excluded IDs (self + all descendants) to prevent cyclic hierarchy
   const excludedIds = useMemo(() => {
@@ -95,17 +105,13 @@ export const CategoryFormModal: React.FC<CategoryFormModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const trimmedCode = code.trim().toUpperCase();
     const trimmedName = name.trim();
-
-    if (!trimmedCode) {
-      setError("Mã danh mục không được để trống.");
-      return;
-    }
     if (!trimmedName) {
       setError("Tên danh mục không được để trống.");
       return;
     }
+
+    const trimmedCode = code.trim().toUpperCase() || slugify(trimmedName);
 
     setIsLoading(true);
     setError(null);
@@ -138,11 +144,7 @@ export const CategoryFormModal: React.FC<CategoryFormModalProps> = ({
       onClose={onClose}
       size="md"
       title={isEdit ? "Chỉnh sửa danh mục" : "Thêm danh mục mới"}
-      description={
-        isEdit
-          ? "Cập nhật thông tin chi tiết và phân cấp danh mục."
-          : "Tạo danh mục sản phẩm mới phục vụ phân loại và báo cáo."
-      }
+      description="Tên danh mục được dùng để phân loại sản phẩm trên POS và báo cáo tồn kho."
       footer={
         <>
           <Button variant="secondary" size="sm" onClick={onClose} disabled={isLoading}>
@@ -164,29 +166,31 @@ export const CategoryFormModal: React.FC<CategoryFormModalProps> = ({
 
         <div>
           <Input
-            id="cat-code"
-            label="Mã danh mục *"
-            placeholder="VD: HAI-SAN, DO-UONG, RAU-CU"
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            className="font-mono uppercase"
-            autoFocus={!isEdit}
-            required
-          />
-          <p className="text-[11px] text-text-sub mt-1">
-            Mã định danh duy nhất viết hoa, không dấu (VD: HAI-SAN, DO-UONG).
-          </p>
-        </div>
-
-        <div>
-          <Input
             id="cat-name"
             label="Tên danh mục *"
             placeholder="VD: Hải sản tươi sống, Đồ uống đóng chai"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => handleNameChange(e.target.value)}
+            autoFocus
             required
           />
+        </div>
+
+        <div>
+          <Input
+            id="cat-code"
+            label="Mã danh mục (Tự động sinh từ tên)"
+            placeholder="VD: HAI_SAN_TUOI_SONG, DO_UONG"
+            value={code}
+            onChange={(e) => {
+              setCode(e.target.value.toUpperCase());
+              setIsCodeCustomized(true);
+            }}
+            className="font-mono uppercase text-xs"
+          />
+          <p className="text-[11px] text-text-sub mt-1">
+            Mã định danh tự động sinh, dùng cho phân loại và tích hợp dữ liệu.
+          </p>
         </div>
 
         <div className="space-y-1">
@@ -200,7 +204,7 @@ export const CategoryFormModal: React.FC<CategoryFormModalProps> = ({
             placeholder="-- Chọn danh mục cha --"
           />
           <p className="text-[11px] text-text-sub mt-1">
-            Để trống hoặc chọn &quot;-- Không có (Danh mục gốc) --&quot; nếu là danh mục cấp cao nhất.
+            Để trống nếu là danh mục cấp cao nhất.
           </p>
         </div>
 

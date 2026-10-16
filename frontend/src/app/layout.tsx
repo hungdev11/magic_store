@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import "@/styles/globals.css";
-import { Sidebar } from "@/components/Sidebar";
-import { Header } from "@/components/Header";
+import { Sidebar, Header } from "@/components/layout";
 
 export const metadata: Metadata = {
   title: "Magic Store - Micro-ERP Đa Ngành",

@@ -64,6 +64,7 @@ type WastageParams struct {
 type BOMProductionService struct {
 	db            *gorm.DB
 	ledgerService *InventoryLedgerService
+	uomService    *UOMService
 }
 
 func NewBOMProductionService(db *gorm.DB, ledgerService *InventoryLedgerService) *BOMProductionService {
@@ -73,6 +74,7 @@ func NewBOMProductionService(db *gorm.DB, ledgerService *InventoryLedgerService)
 	return &BOMProductionService{
 		db:            db,
 		ledgerService: ledgerService,
+		uomService:    NewUOMService(db),
 	}
 }
 
@@ -580,11 +582,23 @@ func (s *BOMProductionService) RecordWastage(ctx context.Context, tx *gorm.DB, p
 		inputUom = variant.Product.BaseUom
 	}
 
+	lostBaseQty := lostQty
+	if inputUom != "" && variant.Product != nil && inputUom != variant.Product.BaseUom {
+		conv, err := s.uomService.ToBaseQty(ctx, db, ToBaseQtyParams{
+			VariantID: params.VariantID,
+			InputUOM:  inputUom,
+			InputQty:  lostQty,
+		})
+		if err == nil && conv.GreaterThan(decimal.Zero) {
+			lostBaseQty = conv
+		}
+	}
+
 	mov, err := s.ledgerService.RecordMovement(ctx, db, RecordMovementParams{
 		VariantID:      params.VariantID,
 		BatchID:        params.BatchID,
 		MovementType:   model.MovementTypeWastageSpoilage,
-		QtyInBaseUom:   lostQty.Neg(),
+		QtyInBaseUom:   lostBaseQty.Neg(),
 		InputUOM:       inputUom,
 		InputQty:       lostQty.Neg(),
 		UnitCostAtTime: variant.CostPrice,
@@ -597,7 +611,7 @@ func (s *BOMProductionService) RecordWastage(ctx context.Context, tx *gorm.DB, p
 
 	var cashTx *model.CashbookTransaction
 	if params.RecordToCashbook {
-		expenseAmount := lostQty.Mul(variant.CostPrice)
+		expenseAmount := lostBaseQty.Mul(variant.CostPrice)
 		desc := params.ReasonNote
 		if desc == "" {
 			desc = "Wastage spoilage expense"

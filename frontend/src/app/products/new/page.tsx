@@ -4,17 +4,22 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useStoreProfile } from "@/lib/store";
-import { api, Category, CreateProductInput } from "@/lib/api";
-import { getBadgeClasses, formatVND } from "@/lib/design-tokens";
+import { api, Category, CreateProductInput, Unit } from "@/lib/api";
+import { formatVND } from "@/lib/design-tokens";
 import {
   slugify,
   generateVariantsFromAttributes,
   AttributeInput,
   GeneratedVariant,
 } from "@/lib/matrix-utils";
-import { ImageUploader } from "@/components/common";
 import {
-  ArrowLeft,
+  ImageUploader,
+  PageHeader,
+  Badge,
+  Button,
+  AlertBanner,
+} from "@/components/common";
+import {
   Package,
   Layers,
   Scale,
@@ -30,7 +35,36 @@ import {
   Loader2,
   Tag,
   Wand2,
+  ArrowRightLeft,
 } from "lucide-react";
+
+const COMMON_CONVERSION_RULES: Record<string, { uom_name: string; conversion_factor: number; is_variable_ratio: boolean }[]> = {
+  kg: [
+    { uom_name: "g", conversion_factor: 0.001, is_variable_ratio: false },
+    { uom_name: "con", conversion_factor: 1, is_variable_ratio: true },
+  ],
+  kilogram: [
+    { uom_name: "g", conversion_factor: 0.001, is_variable_ratio: false },
+  ],
+  thùng: [
+    { uom_name: "lon", conversion_factor: 24, is_variable_ratio: false },
+    { uom_name: "chai", conversion_factor: 24, is_variable_ratio: false },
+    { uom_name: "hộp", conversion_factor: 12, is_variable_ratio: false },
+  ],
+  hộp: [
+    { uom_name: "cái", conversion_factor: 10, is_variable_ratio: false },
+    { uom_name: "gói", conversion_factor: 10, is_variable_ratio: false },
+  ],
+  lít: [
+    { uom_name: "ml", conversion_factor: 0.001, is_variable_ratio: false },
+  ],
+  lit: [
+    { uom_name: "ml", conversion_factor: 0.001, is_variable_ratio: false },
+  ],
+  bao: [
+    { uom_name: "kg", conversion_factor: 50, is_variable_ratio: false },
+  ],
+};
 
 const COMMON_UOMS = [
   "kg",
@@ -41,6 +75,10 @@ const COMMON_UOMS = [
   "con",
   "lon",
   "chai",
+  "lít",
+  "ml",
+  "thùng",
+  "bao",
   "mét",
   "bộ",
   "khay",
@@ -89,8 +127,9 @@ export default function NewProductPage() {
   const router = useRouter();
   const { isModuleEnabled, storeSetting } = useStoreProfile();
 
-  // Categories
+  // Categories & Units
   const [categories, setCategories] = useState<Category[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   const [isAddingNewCat, setIsAddingNewCat] = useState(false);
   const [newCatName, setNewCatName] = useState("");
 
@@ -120,6 +159,7 @@ export default function NewProductPage() {
 
   // Block 3: Catch-weight & Secondary Units (catch_weight = true)
   const [isWeighable, setIsWeighable] = useState(false);
+  const [showConversionsSection, setShowConversionsSection] = useState(false);
   const [conversions, setConversions] = useState<ConversionRow[]>([]);
 
   // Block 4: BOM Production (bom_production = true)
@@ -133,19 +173,60 @@ export default function NewProductPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Load initial categories
+  // Load initial categories & units
   useEffect(() => {
-    api.getCategories()
-      .then((cats) => {
+    Promise.all([
+      api.getCategories(),
+      api.getUnits(true),
+    ])
+      .then(([cats, uoms]) => {
         setCategories(cats || []);
         if (cats && cats.length > 0) {
           setCategoryId(cats[0].id);
         }
+        setUnits(uoms || []);
+        if (uoms && uoms.length > 0) {
+          const firstUom = uoms[0].name.toLowerCase();
+          setBaseUom(firstUom);
+          // Suggest conversions if preset exists
+          const matched = COMMON_CONVERSION_RULES[firstUom];
+          if (matched && matched.length > 0) {
+            setConversions(matched.map(m => ({ ...m, default_price_for_uom: undefined })));
+          }
+        }
       })
       .catch((err) => {
-        console.error("Lỗi khi tải danh mục:", err);
+        console.error("Lỗi khi tải dữ liệu ban đầu:", err);
       });
   }, []);
+
+  const handleApplySuggestedConversions = (targetUom?: string) => {
+    const key = (targetUom || baseUom).toLowerCase().trim();
+    const matched = COMMON_CONVERSION_RULES[key];
+    if (matched && matched.length > 0) {
+      setConversions(matched.map(m => ({
+        uom_name: m.uom_name,
+        conversion_factor: m.conversion_factor,
+        is_variable_ratio: m.is_variable_ratio,
+        default_price_for_uom: undefined,
+      })));
+    }
+  };
+
+  const handleBaseUomChange = (newUom: string) => {
+    setBaseUom(newUom);
+    if (conversions.length === 0) {
+      const matched = COMMON_CONVERSION_RULES[newUom.toLowerCase().trim()];
+      if (matched && matched.length > 0) {
+        setConversions(matched.map(m => ({
+          uom_name: m.uom_name,
+          conversion_factor: m.conversion_factor,
+          is_variable_ratio: m.is_variable_ratio,
+          default_price_for_uom: undefined,
+        })));
+      }
+    }
+  };
 
   // Sync default matrix state when module is loaded
   useEffect(() => {
@@ -361,52 +442,34 @@ export default function NewProductPage() {
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-16">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/products"
-            className="p-2 rounded-lg border border-border-subtle bg-surface-card hover:bg-surface-muted text-text-sub hover:text-text-main transition shadow-sm"
-            title="Quay lại danh sách"
+      <PageHeader
+        backHref="/products"
+        title="Thêm Sản phẩm Mới"
+        description="Biểu mẫu tự thích ứng theo cấu hình: Ma trận Màu × Size, Cân ký và Định mức BOM."
+        badge={
+          <Badge variant="brand">
+            Tự thích ứng
+          </Badge>
+        }
+        actions={
+          <Button
+            variant="primary"
+            size="md"
+            onClick={handleSubmit}
+            isLoading={isSubmitting}
           >
-            <ArrowLeft className="w-5 h-5" />
-          </Link>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-brand px-2 py-0.5 rounded bg-brand-light border border-emerald-200">
-                Form thích ứng
-              </span>
-              <span className="text-xs text-text-sub">Thích ứng theo Feature Flags</span>
-            </div>
-            <h1 className="text-2xl font-bold text-text-main mt-0.5">
-              Thêm Sản phẩm Thông minh
-            </h1>
-          </div>
-        </div>
-
-        <button
-          onClick={handleSubmit}
-          disabled={isSubmitting}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-hover shadow-sm transition disabled:opacity-50"
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Đang lưu...</span>
-            </>
-          ) : (
-            <>
-              <Save className="w-4 h-4" />
-              <span>Tạo sản phẩm</span>
-            </>
-          )}
-        </button>
-      </div>
+            <Save className="w-4 h-4 mr-1.5" />
+            <span>Tạo sản phẩm</span>
+          </Button>
+        }
+      />
 
       {formError && (
-        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-sm flex items-center gap-2">
-          <AlertCircle className="w-5 h-5 shrink-0 text-rose-600" />
-          <span>{formError}</span>
-        </div>
+        <AlertBanner
+          type="error"
+          message={formError}
+          onClose={() => setFormError(null)}
+        />
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -521,14 +584,20 @@ export default function NewProductPage() {
               <div className="flex gap-2">
                 <select
                   value={baseUom}
-                  onChange={(e) => setBaseUom(e.target.value)}
+                  onChange={(e) => handleBaseUomChange(e.target.value)}
                   className="w-full px-3.5 py-2.5 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
                 >
-                  {COMMON_UOMS.map((u) => (
-                    <option key={u} value={u}>
-                      {u}
-                    </option>
-                  ))}
+                  {units.length > 0
+                    ? units.map((u) => (
+                        <option key={u.id} value={u.name.toLowerCase()}>
+                          {u.name} ({u.code})
+                        </option>
+                      ))
+                    : COMMON_UOMS.map((u) => (
+                        <option key={u} value={u}>
+                          {u}
+                        </option>
+                      ))}
                   <option value="KHAC">Khác (tự gõ)...</option>
                 </select>
                 {baseUom === "KHAC" && (
@@ -667,7 +736,7 @@ export default function NewProductPage() {
                 <div>
                   <h2 className="text-base font-semibold text-text-main flex items-center gap-2">
                     2. Ma trận Biến thể (Màu sắc × Kích cỡ)
-                    <span className={getBadgeClasses("matrix")}>Mô-đun Thời trang</span>
+                    <Badge variant="matrix">Mô-đun Thời trang</Badge>
                   </h2>
                   <p className="text-xs text-text-sub mt-0.5">
                     Tự động tính tích Descartes và sinh tổ hợp SKU đa thuộc tính.
@@ -859,61 +928,87 @@ export default function NewProductPage() {
         )}
 
         {/* =========================================================================
-            KHỐI 3: CÂN ĐIỆN TỬ & ĐƠN VỊ PHỤ (CHỈ HIỆN KHI catch_weight = true)
+            KHỐI 3: CÂN ĐIỆN TỬ & ĐƠN VỊ TÍNH QUY ĐỔI
         ========================================================================= */}
-        {isModuleEnabled("catch_weight") && (
+        {(isModuleEnabled("catch_weight") || showConversionsSection || conversions.length > 0) ? (
           <section className="bg-surface-card rounded-xl p-6 border border-cyan-200 shadow-card space-y-4">
             <div className="flex items-center justify-between border-b border-border-subtle pb-3">
               <div className="flex items-center gap-2">
                 <Scale className="w-5 h-5 text-cyan-600" />
                 <div>
                   <h2 className="text-base font-semibold text-text-main flex items-center gap-2">
-                    3. Cân điện tử & Đơn vị tính quy đổi
-                    <span className={getBadgeClasses("catchweight")}>Mô-đun Hải sản / Cân ký</span>
+                    3. Đơn vị tính quy đổi & Bán theo quy cách
+                    {isModuleEnabled("catch_weight") && (
+                      <Badge variant="catchweight">Hải sản / Cân ký</Badge>
+                    )}
                   </h2>
                   <p className="text-xs text-text-sub mt-0.5">
-                    Hỗ trợ tỷ lệ biến thiên (Variable Ratio) bắt buộc cân thực tế tại quầy POS.
+                    Hỗ trợ bán theo thùng, lon, chai hoặc con với hệ số quy đổi hoặc cân thực tế tại quầy POS.
                   </p>
                 </div>
               </div>
             </div>
 
             {/* Weighable Checkbox */}
-            <div className="p-3.5 bg-cyan-50/50 rounded-lg border border-cyan-100 flex items-center gap-3">
-              <input
-                type="checkbox"
-                id="is_weighable_cb"
-                checked={isWeighable}
-                onChange={(e) => setIsWeighable(e.target.checked)}
-                className="w-4 h-4 text-cyan-600 rounded border-slate-300 focus:ring-cyan-500"
-              />
-              <label htmlFor="is_weighable_cb" className="text-sm font-medium text-text-main cursor-pointer">
-                Hàng cần cân thực tế tại quầy (<span className="font-mono text-cyan-700">is_weighable</span>)
-              </label>
-            </div>
+            {isModuleEnabled("catch_weight") && (
+              <div className="p-3.5 bg-cyan-50/50 rounded-lg border border-cyan-100 flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="is_weighable_cb"
+                  checked={isWeighable}
+                  onChange={(e) => setIsWeighable(e.target.checked)}
+                  className="w-4 h-4 text-cyan-600 rounded border-slate-300 focus:ring-cyan-500"
+                />
+                <label htmlFor="is_weighable_cb" className="text-sm font-medium text-text-main cursor-pointer">
+                  Hàng cần cân thực tế tại quầy (<span className="font-mono text-cyan-700">is_weighable</span>)
+                </label>
+              </div>
+            )}
 
             {/* UOM Conversions Table */}
             <div className="space-y-3 pt-2">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-text-sub uppercase tracking-wider">
-                  Bảng quy đổi Đơn vị phụ (Con, Thùng, Khay, Két...)
+                  Bảng quy đổi Đơn vị phụ (Con, Thùng, Khay, Lon, Hộp...)
                 </span>
-                <button
-                  type="button"
-                  onClick={handleAddConversion}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-700 bg-cyan-50 px-3 py-1.5 rounded-lg border border-cyan-200 hover:bg-cyan-100 transition"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Thêm đơn vị quy đổi</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleApplySuggestedConversions()}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-brand bg-brand/10 px-3 py-1.5 rounded-lg border border-brand/20 hover:bg-brand/20 transition"
+                    title={`Gợi ý tự động cho đơn vị ${baseUom}`}
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                    <span>Gợi ý quy đổi cho &quot;{baseUom}&quot;</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddConversion}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-700 bg-cyan-50 px-3 py-1.5 rounded-lg border border-cyan-200 hover:bg-cyan-100 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Thêm đơn vị quy đổi</span>
+                  </button>
+                </div>
               </div>
 
               {conversions.length === 0 ? (
-                <div className="text-xs text-text-sub italic bg-surface-muted/40 p-4 rounded-lg border border-dashed border-border-subtle text-center">
-                  Chưa có đơn vị phụ. Bấm &quot;Thêm đơn vị quy đổi&quot; nếu sản phẩm bán theo Con, Rổ hoặc Thùng.
+                <div className="text-xs text-text-sub italic bg-surface-muted/40 p-4 rounded-lg border border-dashed border-border-subtle text-center space-y-2">
+                  <p>Chưa có đơn vị phụ. Bấm &quot;Gợi ý quy đổi&quot; hoặc &quot;Thêm đơn vị quy đổi&quot; nếu sản phẩm bán theo Thùng, Lon, Hộp hoặc Con.</p>
                 </div>
               ) : (
                 <div className="space-y-2">
+                  <datalist id="uom-options">
+                    {units.map((u) => (
+                      <option key={u.id} value={u.name.toLowerCase()}>
+                        {u.name} ({u.code})
+                      </option>
+                    ))}
+                    {COMMON_UOMS.map((u) => (
+                      <option key={u} value={u} />
+                    ))}
+                  </datalist>
+
                   {conversions.map((row, idx) => (
                     <div
                       key={idx}
@@ -925,7 +1020,8 @@ export default function NewProductPage() {
                         </label>
                         <input
                           type="text"
-                          placeholder="Ví dụ: Con, Thùng, Khay"
+                          list="uom-options"
+                          placeholder="Ví dụ: Con, Thùng, Lon"
                           value={row.uom_name}
                           onChange={(e) => handleConversionChange(idx, "uom_name", e.target.value)}
                           className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-border-subtle rounded font-medium"
@@ -938,9 +1034,9 @@ export default function NewProductPage() {
                         </label>
                         <input
                           type="number"
-                          step="0.01"
-                          min="0.001"
-                          placeholder="e.g. 1.2 hoặc 24"
+                          step="0.001"
+                          min="0.0001"
+                          placeholder="e.g. 24 hoặc 0.001"
                           value={row.conversion_factor}
                           onChange={(e) =>
                             handleConversionChange(idx, "conversion_factor", Number(e.target.value))
@@ -957,7 +1053,7 @@ export default function NewProductPage() {
                           type="number"
                           step="500"
                           min="0"
-                          placeholder="Để trống nếu tính theo kg"
+                          placeholder="Để trống nếu theo ĐVT gốc"
                           value={row.default_price_for_uom || ""}
                           onChange={(e) =>
                             handleConversionChange(
@@ -1000,6 +1096,17 @@ export default function NewProductPage() {
               )}
             </div>
           </section>
+        ) : (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setShowConversionsSection(true)}
+              className="text-xs text-brand hover:underline font-medium flex items-center gap-1"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Thiết lập bảng quy đổi đơn vị phụ (Thùng, Lon, Hộp, v.v...)</span>
+            </button>
+          </div>
         )}
 
         {/* =========================================================================
@@ -1013,7 +1120,7 @@ export default function NewProductPage() {
                 <div>
                   <h2 className="text-base font-semibold text-text-main flex items-center gap-2">
                     4. Công thức Chế biến & Định mức BOM
-                    <span className={getBadgeClasses("bom")}>Mô-đun Sản xuất / F&B</span>
+                    <Badge variant="bom">Mô-đun Sản xuất / F&B</Badge>
                   </h2>
                   <p className="text-xs text-text-sub mt-0.5">
                     Lựa chọn chế độ cấu thành công thức định mức cho sản phẩm này.
@@ -1065,7 +1172,7 @@ export default function NewProductPage() {
                 <div>
                   <h2 className="text-base font-semibold text-text-main flex items-center gap-2">
                     5. Đồ ăn kèm / Topping
-                    <span className={getBadgeClasses("modifier")}>Mô-đun F&B Topping</span>
+                    <Badge variant="modifier">Mô-đun F&B Topping</Badge>
                   </h2>
                   <p className="text-xs text-text-sub mt-0.5">
                     Cho phép gắn nhóm tùy chọn topping (Trân châu, Thạch, Trứng ốp la...) khi order tại quầy POS.

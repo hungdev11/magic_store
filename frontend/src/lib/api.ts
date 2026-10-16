@@ -160,7 +160,38 @@ export interface PurchaseInput {
   supplier_id?: string;
   reference_id?: string;
   notes?: string;
+  payment_method?: string;
+  amount_paid?: number;
   items: PurchaseItem[];
+}
+
+export interface ReceiptLineItem {
+  id: string;
+  variant_id: string;
+  product_name: string;
+  variant_name: string;
+  sku: string;
+  base_uom: string;
+  input_uom: string;
+  input_qty: number | string;
+  qty_in_base_uom: number | string;
+  unit_cost_at_time: number | string;
+  line_total: number | string;
+  batch_code?: string;
+  expiry_date?: string;
+}
+
+export interface InventoryReceipt {
+  reference_id: string;
+  movement_type: "PURCHASE_IN" | "WASTAGE_SPOILAGE" | string;
+  created_at: string;
+  item_count: number;
+  total_qty: number | string;
+  total_amount: number | string;
+  partner_id?: string;
+  partner_name?: string;
+  notes?: string;
+  items?: ReceiptLineItem[];
 }
 
 export interface WastageInput {
@@ -356,7 +387,7 @@ export const api = {
     const query = activeOnly ? "?active_only=true" : "";
     return request<Unit[]>(`/units${query}`);
   },
-  createUnit: (data: Partial<Unit> | { code: string; name: string; description?: string; is_active?: boolean }) =>
+  createUnit: (data: Partial<Unit> | { code?: string; name: string; description?: string; is_active?: boolean }) =>
     request<Unit>("/units", {
       method: "POST",
       body: JSON.stringify(data),
@@ -430,7 +461,16 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  // Inventory
+  // Inventory & Receipts
+  getReceipts: (params?: { type?: string; q?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.type) sp.append("type", params.type);
+    if (params?.q) sp.append("q", params.q);
+    const qs = sp.toString();
+    return request<InventoryReceipt[]>(`/inventory/receipts${qs ? `?${qs}` : ""}`);
+  },
+  getReceiptDetail: (id: string) =>
+    request<InventoryReceipt>(`/inventory/receipts/${encodeURIComponent(id)}`),
   createPurchase: (data: PurchaseInput) =>
     request<{ message: string }>("/inventory/purchase", {
       method: "POST",

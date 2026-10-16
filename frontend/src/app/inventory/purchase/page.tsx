@@ -11,10 +11,18 @@ import {
   ProductVariant,
   PurchaseInput,
   PurchaseItem,
+  InventoryReceipt,
 } from "@/lib/api";
-import { formatVND, formatQty, getBadgeClasses } from "@/lib/design-tokens";
+import { formatVND, formatQty } from "@/lib/design-tokens";
 import {
-  ArrowLeft,
+  PageHeader,
+  Badge,
+  Button,
+  LoadingState,
+  AlertBanner,
+} from "@/components/common";
+import { ReceiptDetailDrawer } from "@/components/inventory/ReceiptDetailDrawer";
+import {
   ArrowDownToLine,
   Plus,
   Trash2,
@@ -29,15 +37,17 @@ import {
   Calculator,
   TrendingUp,
   TrendingDown,
-  Sparkles,
   CalendarClock,
   Layers,
   Scale,
   RotateCcw,
   UserPlus,
-  X,
   ExternalLink,
   ChevronDown,
+  X,
+  Eye,
+  ArrowLeft,
+  RefreshCw,
 } from "lucide-react";
 
 interface PurchaseItemRow {
@@ -63,6 +73,13 @@ interface PurchaseItemRow {
 export default function PurchaseOrderPage() {
   const router = useRouter();
   const { isModuleEnabled } = useStoreProfile();
+
+  // View Mode: LIST or CREATE
+  const [viewMode, setViewMode] = useState<"LIST" | "CREATE">("LIST");
+  const [receipts, setReceipts] = useState<InventoryReceipt[]>([]);
+  const [isLoadingReceipts, setIsLoadingReceipts] = useState(true);
+  const [receiptSearchTerm, setReceiptSearchTerm] = useState("");
+  const [activeDrawerRef, setActiveDrawerRef] = useState<string | null>(null);
 
   // Master Data
   const [partners, setPartners] = useState<Partner[]>([]);
@@ -122,9 +139,33 @@ export default function PurchaseOrderPage() {
     }
   };
 
+  const loadReceipts = async () => {
+    setIsLoadingReceipts(true);
+    try {
+      const data = await api.getReceipts({ type: "PURCHASE" });
+      setReceipts(data || []);
+    } catch (err: any) {
+      console.error("Lỗi tải danh sách phiếu nhập:", err);
+    } finally {
+      setIsLoadingReceipts(false);
+    }
+  };
+
   useEffect(() => {
     loadMasterData();
+    loadReceipts();
   }, []);
+
+  const filteredReceipts = useMemo(() => {
+    if (!receiptSearchTerm.trim()) return receipts;
+    const term = receiptSearchTerm.toLowerCase();
+    return receipts.filter(
+      (r) =>
+        r.reference_id.toLowerCase().includes(term) ||
+        (r.partner_name && r.partner_name.toLowerCase().includes(term)) ||
+        (r.notes && r.notes.toLowerCase().includes(term))
+    );
+  }, [receipts, receiptSearchTerm]);
 
   // Flattened list of product variants for easy selection
   const flatVariants = useMemo(() => {
@@ -412,6 +453,9 @@ export default function PurchaseOrderPage() {
       setSubmitSuccess(
         `Đã tạo phiếu nhập kho "${referenceCode}" thành công! Tồn kho và giá vốn WAC đã được cập nhật.`
       );
+      handleResetForm();
+      await loadReceipts();
+      setViewMode("LIST");
     } catch (err: any) {
       setSubmitError(err.message || "Lỗi khi xử lý nhập hàng.");
     } finally {
@@ -435,82 +479,238 @@ export default function PurchaseOrderPage() {
     loadMasterData();
   };
 
-  return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border-subtle pb-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Link
-              href="/products"
-              className="inline-flex items-center gap-1 text-xs text-text-sub hover:text-text-main transition-colors"
+  if (viewMode === "LIST") {
+    return (
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header */}
+        <PageHeader
+          backHref="/products"
+          title="Phiếu Nhập Hàng"
+          description="Quản lý lịch sử chứng từ nhập kho từ nhà cung cấp, kiểm soát số lô, hạn dùng và giá vốn."
+          actions={
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                handleResetForm();
+                setViewMode("CREATE");
+              }}
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Quay lại Sản phẩm</span>
-            </Link>
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              <span>Tạo phiếu nhập mới</span>
+            </Button>
+          }
+          badge={
+            <Badge variant="brand">
+              <ArrowDownToLine className="w-3.5 h-3.5 mr-1" />
+              {receipts.length} chứng từ
+            </Badge>
+          }
+        />
+
+        {/* Success Alert */}
+        {submitSuccess && (
+          <AlertBanner
+            type="success"
+            message={submitSuccess}
+            onClose={() => setSubmitSuccess(null)}
+          />
+        )}
+
+        {/* Search & Toolbar */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-surface-card p-3 rounded-lg border border-border-default shadow-xs">
+          <div className="relative w-full sm:w-80">
+            <Search className="w-4 h-4 text-text-sub absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Tìm theo mã chứng từ, NCC, ghi chú..."
+              value={receiptSearchTerm}
+              onChange={(e) => setReceiptSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 text-xs bg-surface-app border border-border-default rounded-sm text-text-main focus:outline-none focus:border-brand font-medium placeholder:text-text-sub"
+            />
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-brand/10 border border-brand/20 flex items-center justify-center text-brand">
-              <ArrowDownToLine className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-text-main">
-                Tạo Phiếu Nhập Hàng (PO & Kho Vận)
-              </h1>
-              <p className="text-xs text-text-sub">
-                Nhập hàng từ nhà cung cấp, ghi nhận số lô, hạn sử dụng và cập nhật giá vốn WAC tức thì
-              </p>
-            </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={loadReceipts}
+              disabled={isLoadingReceipts}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isLoadingReceipts ? "animate-spin" : ""}`} />
+              <span>Làm mới</span>
+            </Button>
           </div>
         </div>
 
-        {/* Feature Badges Active Status */}
-        <div className="flex flex-wrap items-center gap-2">
-          {isModuleEnabled("batch_expiry") && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
-              <CalendarClock className="w-3.5 h-3.5 text-amber-600" />
-              Lô & Hạn sử dụng
-            </span>
-          )}
-          {isModuleEnabled("credit_ledger") && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-rose-50 text-rose-800 border border-rose-200">
-              <CreditCard className="w-3.5 h-3.5 text-rose-600" />
-              Sổ nợ NCC
-            </span>
-          )}
-          {isModuleEnabled("catch_weight") && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-cyan-50 text-cyan-800 border border-cyan-200">
-              <Scale className="w-3.5 h-3.5 text-cyan-600" />
-              Cân ký & Biến thiên
-            </span>
-          )}
-        </div>
+        {/* Receipts Table */}
+        {isLoadingReceipts ? (
+          <LoadingState
+            message="Đang tải danh sách phiếu nhập kho..."
+            submessage="Truy vấn sổ cái kho hàng"
+          />
+        ) : filteredReceipts.length === 0 ? (
+          <div className="p-12 text-center bg-surface-card border border-dashed border-border-default rounded-xl space-y-3">
+            <div className="w-12 h-12 rounded-full bg-brand/10 text-brand flex items-center justify-center mx-auto">
+              <ArrowDownToLine className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-semibold text-text-main">
+              {receiptSearchTerm ? "Không tìm thấy phiếu nhập phù hợp" : "Chưa có phiếu nhập hàng nào"}
+            </h3>
+            <p className="text-xs text-text-sub max-w-sm mx-auto">
+              {receiptSearchTerm
+                ? "Thử thay đổi từ khóa tìm kiếm mã chứng từ hoặc nhà cung cấp."
+                : "Tạo phiếu nhập đầu tiên để cập nhật số lượng tồn kho và giá vốn WAC."}
+            </p>
+            {!receiptSearchTerm && (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  handleResetForm();
+                  setViewMode("CREATE");
+                }}
+              >
+                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                <span>Lập phiếu nhập đầu tiên</span>
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="bg-surface-card rounded-lg border border-border-default overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-surface-app text-text-sub font-semibold border-b border-border-default">
+                  <tr>
+                    <th className="py-3 px-3 text-left">Mã chứng từ</th>
+                    <th className="py-3 px-3 text-left">Thời gian nhập</th>
+                    <th className="py-3 px-3 text-left">Nhà cung cấp</th>
+                    <th className="py-3 px-3 text-right">Số mặt hàng</th>
+                    <th className="py-3 px-3 text-right">Tổng tiền hàng</th>
+                    <th className="py-3 px-3 text-left">Ghi chú</th>
+                    <th className="py-3 px-3 text-center w-28">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-default bg-surface-card">
+                  {filteredReceipts.map((r) => (
+                    <tr
+                      key={r.reference_id}
+                      onClick={() => setActiveDrawerRef(r.reference_id)}
+                      className="hover:bg-surface-app/60 cursor-pointer transition-colors"
+                    >
+                      <td className="py-3 px-3">
+                        <span className="font-mono font-bold text-brand hover:underline">
+                          {r.reference_id}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-text-sub whitespace-nowrap">
+                        {new Date(r.created_at).toLocaleString("vi-VN")}
+                      </td>
+                      <td className="py-3 px-3 font-medium text-text-main">
+                        {r.partner_name || <span className="text-text-disabled">-</span>}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono tabular-nums">
+                        <Badge variant="default">{r.item_count} món</Badge>
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-bold tabular-nums text-text-main">
+                        {formatVND(Number(r.total_amount || 0))}
+                      </td>
+                      <td className="py-3 px-3 text-text-sub max-w-xs truncate" title={r.notes || ""}>
+                        {r.notes || <span className="text-text-disabled">-</span>}
+                      </td>
+                      <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setActiveDrawerRef(r.reference_id)}
+                          className="h-7 text-xs"
+                        >
+                          <Eye className="w-3.5 h-3.5 mr-1 text-text-sub" />
+                          <span>Chi tiết</span>
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <ReceiptDetailDrawer
+          isOpen={Boolean(activeDrawerRef)}
+          referenceId={activeDrawerRef}
+          onClose={() => setActiveDrawerRef(null)}
+        />
       </div>
+    );
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6">
+      <div className="flex items-center justify-between pb-1">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setViewMode("LIST")}
+        >
+          <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
+          <span>Danh sách phiếu nhập</span>
+        </Button>
+      </div>
+
+      {/* Top Header */}
+      <PageHeader
+        backHref="/products"
+        title="Tạo Phiếu Nhập Hàng"
+        description="Nhập hàng từ nhà cung cấp, ghi nhận số lô, hạn sử dụng và cập nhật giá vốn WAC tức thì."
+        badge={
+          <div className="flex flex-wrap items-center gap-1.5">
+            {isModuleEnabled("batch_expiry") && (
+              <Badge variant="alert">
+                <CalendarClock className="w-3.5 h-3.5 mr-1" />
+                Lô & HSD
+              </Badge>
+            )}
+            {isModuleEnabled("credit_ledger") && (
+              <Badge variant="outflow">
+                <CreditCard className="w-3.5 h-3.5 mr-1" />
+                Sổ nợ NCC
+              </Badge>
+            )}
+            {isModuleEnabled("catch_weight") && (
+              <Badge variant="catchweight">
+                <Scale className="w-3.5 h-3.5 mr-1" />
+                Cân ký
+              </Badge>
+            )}
+          </div>
+        }
+      />
 
       {/* Success Notification Alert */}
       {submitSuccess && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3 shadow-sm">
-          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-md flex items-start gap-3 shadow-card">
+          <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
           <div className="flex-1">
             <h3 className="text-sm font-semibold text-emerald-900">
-              Nhập hàng hoàn tất thành công!
+              Nhập hàng hoàn tất thành công
             </h3>
-            <p className="text-xs text-emerald-700 mt-0.5">{submitSuccess}</p>
-            <div className="flex items-center gap-3 mt-3">
-              <button
-                type="button"
+            <p className="text-xs text-emerald-800 mt-0.5 leading-relaxed">{submitSuccess}</p>
+            <div className="flex items-center gap-2 mt-3">
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={handleResetForm}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 shadow-sm transition-colors"
               >
-                <Plus className="w-3.5 h-3.5" />
-                Tạo phiếu nhập mới
-              </button>
-              <Link
-                href="/products"
-                className="px-3 py-1.5 bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                Xem danh sách sản phẩm & tồn kho
+                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                <span>Tạo phiếu nhập mới</span>
+              </Button>
+              <Link href="/products">
+                <Button variant="secondary" size="sm">
+                  <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                  <span>Danh sách sản phẩm</span>
+                </Button>
               </Link>
             </div>
           </div>
@@ -519,40 +719,30 @@ export default function PurchaseOrderPage() {
 
       {/* Error Notification Alert */}
       {submitError && (
-        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3 shadow-sm">
-          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold text-rose-900">
-              Không thể hoàn tất phiếu nhập
-            </h3>
-            <p className="text-xs text-rose-700 mt-0.5">{submitError}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setSubmitError(null)}
-            className="text-rose-500 hover:text-rose-800 text-xs"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <AlertBanner
+          type="error"
+          message={submitError}
+          onClose={() => setSubmitError(null)}
+        />
       )}
 
       {/* Loading state for master data */}
       {isLoadingData ? (
-        <div className="p-12 text-center bg-surface-card rounded-xl border border-border-subtle shadow-card flex flex-col items-center justify-center">
-          <Loader2 className="w-8 h-8 text-brand animate-spin mb-3" />
-          <span className="text-sm text-text-sub">Đang tải dữ liệu nhà cung cấp và danh mục hàng hóa...</span>
-        </div>
+        <LoadingState
+          message="Đang tải dữ liệu nhà cung cấp và danh mục hàng hóa..."
+          submessage="Kết nối dữ liệu Micro-ERP"
+        />
       ) : fetchError ? (
-        <div className="p-6 bg-rose-50 border border-rose-200 rounded-xl text-center">
+        <div className="p-6 bg-rose-50 border border-rose-200 rounded-md text-center">
           <p className="text-sm text-rose-700 font-medium mb-3">{fetchError}</p>
-          <button
+          <Button
+            variant="danger"
+            size="sm"
             onClick={loadMasterData}
-            className="px-4 py-2 bg-rose-600 text-white text-xs rounded-lg font-medium hover:bg-rose-700 inline-flex items-center gap-1.5"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            Thử tải lại
-          </button>
+            <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+            <span>Thử tải lại</span>
+          </Button>
         </div>
       ) : (
         <>
@@ -1238,6 +1428,12 @@ export default function PurchaseOrderPage() {
           </div>
         </div>
       )}
+
+      <ReceiptDetailDrawer
+        isOpen={Boolean(activeDrawerRef)}
+        referenceId={activeDrawerRef}
+        onClose={() => setActiveDrawerRef(null)}
+      />
     </div>
   );
 }

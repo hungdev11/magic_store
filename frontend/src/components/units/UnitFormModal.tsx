@@ -5,6 +5,7 @@ import { Modal } from "@/components/common/Modal";
 import { Button } from "@/components/common/Button";
 import { Input } from "@/components/common/Input";
 import { api, Unit } from "@/lib/api";
+import { slugify } from "@/lib/matrix-utils";
 import { AlertCircle } from "lucide-react";
 
 export interface UnitFormModalProps {
@@ -14,7 +15,6 @@ export interface UnitFormModalProps {
   unit?: Unit | null;
 }
 
-// ponytail: standard unit modal form; upgrade to auto-suggesting ISO/GS1 standard UOMs if global trade interoperability needed.
 export const UnitFormModal: React.FC<UnitFormModalProps> = ({
   isOpen,
   onClose,
@@ -23,6 +23,7 @@ export const UnitFormModal: React.FC<UnitFormModalProps> = ({
 }) => {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
+  const [isCodeCustomized, setIsCodeCustomized] = useState(false);
   const [description, setDescription] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -37,9 +38,11 @@ export const UnitFormModal: React.FC<UnitFormModalProps> = ({
         setName(unit.name || "");
         setDescription(unit.description || "");
         setIsActive(unit.is_active ?? true);
+        setIsCodeCustomized(true);
       } else {
         setCode("");
         setName("");
+        setIsCodeCustomized(false);
         setDescription("");
         setIsActive(true);
       }
@@ -47,20 +50,23 @@ export const UnitFormModal: React.FC<UnitFormModalProps> = ({
     }
   }, [isOpen, unit]);
 
+  const handleNameChange = (val: string) => {
+    setName(val);
+    if (!isCodeCustomized && !isEdit) {
+      setCode(slugify(val));
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const trimmedCode = code.trim().toUpperCase();
     const trimmedName = name.trim();
-
-    if (!trimmedCode) {
-      setError("Mã đơn vị tính không được để trống.");
-      return;
-    }
     if (!trimmedName) {
       setError("Tên đơn vị tính không được để trống.");
       return;
     }
+
+    const trimmedCode = code.trim().toUpperCase() || slugify(trimmedName);
 
     setIsLoading(true);
     setError(null);
@@ -96,11 +102,7 @@ export const UnitFormModal: React.FC<UnitFormModalProps> = ({
       onClose={onClose}
       size="md"
       title={isEdit ? "Chỉnh sửa đơn vị tính" : "Thêm đơn vị tính mới"}
-      description={
-        isEdit
-          ? "Cập nhật thông tin chi tiết của đơn vị tính."
-          : "Tạo đơn vị tính mới để quản lý và quy đổi sản phẩm."
-      }
+      description="Tên đơn vị được dùng làm khóa chính và hiển thị tự động trên toàn hệ thống."
       footer={
         <>
           <Button variant="secondary" size="sm" onClick={onClose} disabled={isLoading}>
@@ -127,29 +129,31 @@ export const UnitFormModal: React.FC<UnitFormModalProps> = ({
 
         <div>
           <Input
-            id="unit-code"
-            label="Mã đơn vị tính *"
-            placeholder="VD: HOP, CAI, KG"
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            className="font-mono uppercase"
-            autoFocus={!isEdit}
+            id="unit-name"
+            label="Tên đơn vị tính *"
+            placeholder="VD: Hộp, Cái, Kilogram, Thùng, Lon"
+            value={name}
+            onChange={(e) => handleNameChange(e.target.value)}
+            autoFocus
             required
           />
-          <p className="text-[11px] text-text-sub mt-1">
-            Mã định danh duy nhất viết hoa, dùng trong bảng quy đổi (VD: HOP, KG, GOI).
-          </p>
         </div>
 
         <div>
           <Input
-            id="unit-name"
-            label="Tên đơn vị tính *"
-            placeholder="VD: Hộp, Cái, Kilogram"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
+            id="unit-code"
+            label="Mã đơn vị tính (Tự động sinh từ tên)"
+            placeholder="VD: HOP, CAI, KG"
+            value={code}
+            onChange={(e) => {
+              setCode(e.target.value.toUpperCase());
+              setIsCodeCustomized(true);
+            }}
+            className="font-mono uppercase text-xs"
           />
+          <p className="text-[11px] text-text-sub mt-1">
+            Hệ thống tự động sinh mã từ tên (được phép chỉnh sửa nếu muốn).
+          </p>
         </div>
 
         <div className="space-y-1">

@@ -8,12 +8,21 @@ import {
   Product,
   ProductVariant,
   WastageInput,
+  InventoryReceipt,
 } from "@/lib/api";
 import { formatVND, formatQty } from "@/lib/design-tokens";
 import {
+  PageHeader,
+  Badge,
+  Button,
+  LoadingState,
+  AlertBanner,
+  ConfirmDialog,
+} from "@/components/common";
+import { ReceiptDetailDrawer } from "@/components/inventory/ReceiptDetailDrawer";
+import {
   Trash2,
   AlertTriangle,
-  ArrowLeft,
   CalendarClock,
   Layers,
   Scale,
@@ -26,11 +35,16 @@ import {
   History,
   TrendingDown,
   FileText,
-  X,
   Flame,
   WalletCards,
   Info,
   Calendar,
+  X,
+  Plus,
+  ArrowLeft,
+  RefreshCw,
+  Eye,
+  Search,
 } from "lucide-react";
 
 interface ExtendedBatch {
@@ -81,6 +95,13 @@ const HIGH_LOSS_THRESHOLD = 500_000; // 500,000 VND warning threshold
 
 export default function InventoryWastagePage() {
   const { isModuleEnabled } = useStoreProfile();
+
+  // View Mode: LIST or CREATE
+  const [viewMode, setViewMode] = useState<"LIST" | "CREATE">("LIST");
+  const [receipts, setReceipts] = useState<InventoryReceipt[]>([]);
+  const [isLoadingReceipts, setIsLoadingReceipts] = useState(true);
+  const [receiptSearchTerm, setReceiptSearchTerm] = useState("");
+  const [activeDrawerRef, setActiveDrawerRef] = useState<string | null>(null);
 
   // Master Data State
   const [products, setProducts] = useState<Product[]>([]);
@@ -173,9 +194,32 @@ export default function InventoryWastagePage() {
     }
   };
 
+  const loadReceipts = async () => {
+    setIsLoadingReceipts(true);
+    try {
+      const data = await api.getReceipts({ type: "WASTAGE" });
+      setReceipts(data || []);
+    } catch (err: any) {
+      console.error("Lỗi tải danh sách phiếu xuất hủy:", err);
+    } finally {
+      setIsLoadingReceipts(false);
+    }
+  };
+
   useEffect(() => {
     loadProducts();
+    loadReceipts();
   }, []);
+
+  const filteredReceipts = useMemo(() => {
+    if (!receiptSearchTerm.trim()) return receipts;
+    const term = receiptSearchTerm.toLowerCase();
+    return receipts.filter(
+      (r) =>
+        r.reference_id.toLowerCase().includes(term) ||
+        (r.notes && r.notes.toLowerCase().includes(term))
+    );
+  }, [receipts, receiptSearchTerm]);
 
   // Flatten variants for dropdown
   const flatVariants = useMemo<FlatVariantItem[]>(() => {
@@ -369,12 +413,9 @@ export default function InventoryWastagePage() {
         )}). Giá trị tổn thất: ${formatVND(totalWastageExpense)}.`
       );
 
-      // Reset form fields
-      const today = new Date().toISOString().slice(2, 10).replace(/-/g, "");
-      const random = Math.floor(1000 + Math.random() * 9000);
-      setReferenceId(`WST-${today}-${random}`);
-      setLostQty("");
-      setReasonNote("");
+      handleResetForm();
+      await loadReceipts();
+      setViewMode("LIST");
     } catch (err: any) {
       setSubmitError(err.message || "Lỗi khi thực hiện ghi nhận hao hụt.");
     } finally {
@@ -382,97 +423,224 @@ export default function InventoryWastagePage() {
     }
   };
 
-  return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* =========================================================================
-          PAGE HEADER
-      ========================================================================== */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border-subtle pb-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Link
-              href="/products"
-              className="inline-flex items-center gap-1 text-xs text-text-sub hover:text-text-main transition-colors"
+  if (viewMode === "LIST") {
+    return (
+      <div className="max-w-7xl mx-auto space-y-6">
+        <PageHeader
+          backHref="/products"
+          title="Phiếu Xuất Hủy & Hao Hụt"
+          description="Lịch sử chứng từ xuất hủy, hư hỏng, hết hạn và hạch toán chi phí sổ quỹ P&L."
+          actions={
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                handleResetForm();
+                setViewMode("CREATE");
+              }}
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Quay lại Sản phẩm</span>
-            </Link>
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              <span>Tạo phiếu xuất hủy</span>
+            </Button>
+          }
+          badge={
+            <Badge variant="outflow">
+              <Trash2 className="w-3.5 h-3.5 mr-1" />
+              {receipts.length} chứng từ
+            </Badge>
+          }
+        />
+
+        {submitSuccess && (
+          <AlertBanner
+            type="success"
+            message={submitSuccess}
+            onClose={() => setSubmitSuccess(null)}
+          />
+        )}
+
+        {/* Search & Toolbar */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-surface-card p-3 rounded-lg border border-border-default shadow-xs">
+          <div className="relative w-full sm:w-80">
+            <Search className="w-4 h-4 text-text-sub absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Tìm theo mã chứng từ, lý do..."
+              value={receiptSearchTerm}
+              onChange={(e) => setReceiptSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 text-xs bg-surface-app border border-border-default rounded-sm text-text-main focus:outline-none focus:border-brand font-medium placeholder:text-text-sub"
+            />
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 shadow-xs">
-              <Trash2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-text-main">
-                Ghi Nhận Hao Hụt & Xuất Hủy Hàng Hóa
-              </h1>
-              <p className="text-xs text-text-sub">
-                Bóc tách rõ ràng chi phí mất mát do hư hỏng, cá chết, hết hạn sử dụng nhằm tính đúng Lãi/Lỗ thực tế
-              </p>
-            </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={loadReceipts}
+              disabled={isLoadingReceipts}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isLoadingReceipts ? "animate-spin" : ""}`} />
+              <span>Làm mới</span>
+            </Button>
           </div>
         </div>
 
-        {/* Feature Badges */}
-        <div className="flex flex-wrap items-center gap-2">
-          {isModuleEnabled("batch_expiry") && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
-              <CalendarClock className="w-3.5 h-3.5 text-amber-600" />
-              Theo dõi Lô/Hạn
-            </span>
-          )}
-          {isModuleEnabled("catch_weight") && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-cyan-50 text-cyan-800 border border-cyan-200">
-              <Scale className="w-3.5 h-3.5 text-cyan-600" />
-              Hao hụt cân ký
-            </span>
-          )}
-          {isModuleEnabled("credit_ledger") && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-800 border border-indigo-200">
-              <WalletCards className="w-3.5 h-3.5 text-indigo-600" />
-              Sổ quỹ nội bộ
-            </span>
-          )}
-        </div>
+        {/* Table */}
+        {isLoadingReceipts ? (
+          <LoadingState
+            message="Đang tải danh sách phiếu xuất hủy..."
+            submessage="Truy vấn sổ cái kho hàng"
+          />
+        ) : filteredReceipts.length === 0 ? (
+          <div className="p-12 text-center bg-surface-card border border-dashed border-border-default rounded-xl space-y-3">
+            <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-semibold text-text-main">
+              {receiptSearchTerm ? "Không tìm thấy phiếu xuất hủy phù hợp" : "Chưa có phiếu xuất hủy nào"}
+            </h3>
+            <p className="text-xs text-text-sub max-w-sm mx-auto">
+              {receiptSearchTerm
+                ? "Thử thay đổi từ khóa tìm kiếm mã chứng từ hoặc lý do."
+                : "Tất cả các đợt bóc tách chi phí mất mát do cá ngộp, hư hỏng, cận date sẽ hiển thị tại đây."}
+            </p>
+            {!receiptSearchTerm && (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  handleResetForm();
+                  setViewMode("CREATE");
+                }}
+              >
+                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                <span>Lập phiếu xuất hủy đầu tiên</span>
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="bg-surface-card rounded-lg border border-border-default overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-surface-app text-text-sub font-semibold border-b border-border-default">
+                  <tr>
+                    <th className="py-3 px-3 text-left">Mã chứng từ</th>
+                    <th className="py-3 px-3 text-left">Thời gian xuất</th>
+                    <th className="py-3 px-3 text-right">Số mặt hàng</th>
+                    <th className="py-3 px-3 text-right">Tổng thiệt hại vốn</th>
+                    <th className="py-3 px-3 text-left">Lý do & Ghi chú</th>
+                    <th className="py-3 px-3 text-center w-28">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-default bg-surface-card">
+                  {filteredReceipts.map((r) => (
+                    <tr
+                      key={r.reference_id}
+                      onClick={() => setActiveDrawerRef(r.reference_id)}
+                      className="hover:bg-surface-app/60 cursor-pointer transition-colors"
+                    >
+                      <td className="py-3 px-3">
+                        <span className="font-mono font-bold text-rose-600 hover:underline">
+                          {r.reference_id}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-text-sub whitespace-nowrap">
+                        {new Date(r.created_at).toLocaleString("vi-VN")}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono tabular-nums">
+                        <Badge variant="default">{r.item_count} món</Badge>
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-bold tabular-nums text-rose-600">
+                        {formatVND(Number(r.total_amount || 0))}
+                      </td>
+                      <td className="py-3 px-3 text-text-sub max-w-sm truncate" title={r.notes || ""}>
+                        {r.notes || <span className="text-text-disabled">-</span>}
+                      </td>
+                      <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setActiveDrawerRef(r.reference_id)}
+                          className="h-7 text-xs"
+                        >
+                          <Eye className="w-3.5 h-3.5 mr-1 text-text-sub" />
+                          <span>Chi tiết</span>
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <ReceiptDetailDrawer
+          isOpen={Boolean(activeDrawerRef)}
+          referenceId={activeDrawerRef}
+          onClose={() => setActiveDrawerRef(null)}
+        />
       </div>
+    );
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6">
+      <div className="flex items-center justify-between pb-1">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setViewMode("LIST")}
+        >
+          <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
+          <span>Danh sách phiếu xuất hủy</span>
+        </Button>
+      </div>
+
+      {/* Top Header */}
+      <PageHeader
+        backHref="/products"
+        title="Ghi Nhận Hao Hụt & Xuất Hủy"
+        description="Bóc tách chi phí mất mát do hư hỏng, cá chết, hết hạn sử dụng nhằm tính đúng Lãi/Lỗ thực tế."
+        badge={
+          <div className="flex flex-wrap items-center gap-1.5">
+            {isModuleEnabled("batch_expiry") && (
+              <Badge variant="alert">
+                <CalendarClock className="w-3.5 h-3.5 mr-1" />
+                Lô & HSD
+              </Badge>
+            )}
+            {isModuleEnabled("catch_weight") && (
+              <Badge variant="catchweight">
+                <Scale className="w-3.5 h-3.5 mr-1" />
+                Cân ký
+              </Badge>
+            )}
+            {isModuleEnabled("credit_ledger") && (
+              <Badge variant="bom">
+                <WalletCards className="w-3.5 h-3.5 mr-1" />
+                Sổ quỹ nội bộ
+              </Badge>
+            )}
+          </div>
+        }
+      />
 
       {/* Notifications */}
       {submitSuccess && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3 shadow-xs animate-in fade-in">
-          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold text-emerald-900">
-              Xuất hủy thành công!
-            </h3>
-            <p className="text-xs text-emerald-700 mt-0.5">{submitSuccess}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setSubmitSuccess(null)}
-            className="text-emerald-600 hover:text-emerald-900 text-xs"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <AlertBanner
+          type="success"
+          message={submitSuccess}
+          onClose={() => setSubmitSuccess(null)}
+        />
       )}
 
       {submitError && (
-        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3 shadow-xs animate-in fade-in">
-          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold text-rose-900">
-              Không thể xuất hủy hàng hóa
-            </h3>
-            <p className="text-xs text-rose-700 mt-0.5">{submitError}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setSubmitError(null)}
-            className="text-rose-500 hover:text-rose-800 text-xs"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <AlertBanner
+          type="error"
+          message={submitError}
+          onClose={() => setSubmitError(null)}
+        />
       )}
 
       {/* =========================================================================
@@ -912,138 +1080,6 @@ export default function InventoryWastagePage() {
       )}
 
       {/* =========================================================================
-          BẢNG LỊCH SỬ CÁC ĐỢT XUẤT HỦY GẦN ĐÂY
-      ========================================================================== */}
-      <div className="bg-surface-card rounded-xl border border-border-subtle p-5 shadow-card space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-border-subtle pb-3">
-          <div className="flex items-center gap-2">
-            <History className="w-4 h-4 text-brand" />
-            <h3 className="text-sm font-semibold text-text-main">
-              Lịch Sử Các Đợt Xuất Hủy Gần Đây
-            </h3>
-          </div>
-          <span className="text-xs text-text-sub font-mono">
-            Hiển thị {wastageHistory.length} phiếu gần nhất
-          </span>
-        </div>
-
-        {wastageHistory.length === 0 ? (
-          <div className="py-12 text-center text-text-sub text-xs">
-            Chưa có đợt xuất hủy nào được ghi nhận trong phiên làm việc.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-border-subtle bg-surface-muted/50 text-text-sub font-semibold">
-                  <th className="py-2.5 px-3 w-10 text-center">#</th>
-                  <th className="py-2.5 px-3 min-w-[130px]">Mã phiếu & Thời gian</th>
-                  <th className="py-2.5 px-3 min-w-[180px]">Sản phẩm & Biến thể</th>
-                  <th className="py-2.5 px-3 w-28 text-right">Số lượng hủy</th>
-                  <th className="py-2.5 px-3 w-28 text-right">Giá vốn WAC</th>
-                  <th className="py-2.5 px-3 w-36 text-right">Tổn thất vốn</th>
-                  <th className="py-2.5 px-3 min-w-[200px]">Lý do & Ghi chú</th>
-                  <th className="py-2.5 px-3 w-28 text-center">Sổ quỹ nội bộ</th>
-                  <th className="py-2.5 px-3 w-24 text-center">Trạng thái</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border-subtle">
-                {wastageHistory.map((item, index) => (
-                  <tr
-                    key={item.id}
-                    className="hover:bg-surface-card-hover transition-colors"
-                  >
-                    <td className="py-3 px-3 text-center text-text-sub font-mono">
-                      {index + 1}
-                    </td>
-
-                    {/* Mã phiếu & Thời gian */}
-                    <td className="py-3 px-3">
-                      <div className="font-mono font-semibold text-text-main">
-                        {item.referenceId}
-                      </div>
-                      <div className="text-[11px] text-text-disabled mt-0.5 flex items-center gap-1 font-mono">
-                        <Calendar className="w-3 h-3" />
-                        {item.recordedAt}
-                      </div>
-                    </td>
-
-                    {/* Sản phẩm */}
-                    <td className="py-3 px-3">
-                      <div className="font-semibold text-text-main">
-                        {item.productName}
-                      </div>
-                      <div className="text-[11px] text-text-sub mt-0.5 flex items-center gap-1">
-                        <span className="font-mono text-brand font-medium">
-                          {item.sku}
-                        </span>
-                        {item.variantName && item.variantName !== "Tiêu chuẩn" && (
-                          <span>• {item.variantName}</span>
-                        )}
-                      </div>
-                      {item.batchCode && (
-                        <div className="text-[10px] text-amber-700 font-mono mt-0.5">
-                          Lô: {item.batchCode}
-                        </div>
-                      )}
-                    </td>
-
-                    {/* Số lượng */}
-                    <td className="py-3 px-3 text-right font-mono font-bold text-text-main">
-                      {formatQty(item.lostQty, item.uom)}
-                    </td>
-
-                    {/* WAC */}
-                    <td className="py-3 px-3 text-right font-mono text-text-sub">
-                      {formatVND(item.unitCost)}
-                    </td>
-
-                    {/* Tổn thất vốn */}
-                    <td className="py-3 px-3 text-right font-mono font-bold text-rose-600">
-                      {formatVND(item.totalLoss)}
-                    </td>
-
-                    {/* Lý do */}
-                    <td className="py-3 px-3">
-                      <span className="inline-block px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded text-[11px] font-medium">
-                        {item.reasonCategory}
-                      </span>
-                      {item.reasonNote && (
-                        <p className="text-[11px] text-text-sub mt-1 italic">
-                          {item.reasonNote}
-                        </p>
-                      )}
-                    </td>
-
-                    {/* Sổ quỹ */}
-                    <td className="py-3 px-3 text-center">
-                      {item.recordedToCashbook ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                          <CheckCircle2 className="w-3 h-3" />
-                          Đã trừ quỹ
-                        </span>
-                      ) : (
-                        <span className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                          Không ghi
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Trạng thái */}
-                    <td className="py-3 px-3 text-center">
-                      <span className="inline-block px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded text-[10px] font-medium">
-                        Đã xuất hủy
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* =========================================================================
           HIGH LOSS CONFIRMATION MODAL
       ========================================================================== */}
       {showHighLossModal && selectedItem && (
@@ -1135,6 +1171,12 @@ export default function InventoryWastagePage() {
           </div>
         </div>
       )}
+
+      <ReceiptDetailDrawer
+        isOpen={Boolean(activeDrawerRef)}
+        referenceId={activeDrawerRef}
+        onClose={() => setActiveDrawerRef(null)}
+      />
     </div>
   );
 }

@@ -27,6 +27,62 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+func slugifyVietnamese(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	var sb strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch r {
+		case 'à', 'á', 'ả', 'ã', 'ạ', 'ă', 'ằ', 'ắ', 'ẳ', 'ẵ', 'ặ', 'â', 'ầ', 'ấ', 'ẩ', 'ẫ', 'ậ':
+			sb.WriteRune('a')
+		case 'đ':
+			sb.WriteRune('d')
+		case 'è', 'é', 'ẻ', 'ẽ', 'ẹ', 'ê', 'ề', 'ế', 'ể', 'ễ', 'ệ':
+			sb.WriteRune('e')
+		case 'ì', 'í', 'ỉ', 'ĩ', 'ị':
+			sb.WriteRune('i')
+		case 'ò', 'ó', 'ỏ', 'õ', 'ọ', 'ô', 'ồ', 'ố', 'ổ', 'ỗ', 'ộ', 'ơ', 'ờ', 'ớ', 'ở', 'ỡ', 'ợ':
+			sb.WriteRune('o')
+		case 'ù', 'ú', 'ủ', 'ũ', 'ụ', 'ư', 'ừ', 'ứ', 'ử', 'ữ', 'ự':
+			sb.WriteRune('u')
+		case 'ỳ', 'ý', 'ỷ', 'ỹ', 'ỵ':
+			sb.WriteRune('y')
+		default:
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				sb.WriteRune(r)
+			} else if r == ' ' || r == '-' || r == '_' || r == '/' {
+				sb.WriteRune('_')
+			}
+		}
+	}
+	raw := sb.String()
+	for strings.Contains(raw, "__") {
+		raw = strings.ReplaceAll(raw, "__", "_")
+	}
+	raw = strings.Trim(raw, "_")
+	return strings.ToUpper(raw)
+}
+
+var defaultUnits = []model.Unit{
+	{Code: "KG", Name: "Kilogram", Description: "Đơn vị đo khối lượng"},
+	{Code: "G", Name: "Gram", Description: "Đơn vị đo khối lượng nhỏ"},
+	{Code: "LIT", Name: "Lít", Description: "Đơn vị đo thể tích chất lỏng"},
+	{Code: "ML", Name: "Mililit", Description: "Đơn vị đo thể tích nhỏ"},
+	{Code: "CAI", Name: "Cái", Description: "Đơn vị đếm chiếc, cái"},
+	{Code: "HOP", Name: "Hộp", Description: "Đơn vị đóng hộp"},
+	{Code: "THUNG", Name: "Thùng", Description: "Đơn vị đóng thùng carton/két"},
+	{Code: "LON", Name: "Lon", Description: "Đơn vị đóng lon nhôm/kim loại"},
+	{Code: "CHAI", Name: "Chai", Description: "Đơn vị đóng chai thủy tinh/nhựa"},
+	{Code: "TUI", Name: "Túi", Description: "Đơn vị đóng túi nilong/zipper"},
+	{Code: "BAO", Name: "Bao", Description: "Đơn vị đóng bao tải 25kg/50kg"},
+	{Code: "GOI", Name: "Gói", Description: "Đơn vị gói nhỏ"},
+	{Code: "DON", Name: "Đòn", Description: "Đơn vị đòn chả/bánh"},
+	{Code: "CON", Name: "Con", Description: "Đơn vị đếm cá, gia súc, gia cầm"},
+	{Code: "KHAY", Name: "Khay", Description: "Đơn vị đóng khay thực phẩm"},
+}
+
 // ----------------------------------------------------------------------------
 // Settings & Preset Handlers
 // ----------------------------------------------------------------------------
@@ -168,6 +224,16 @@ type unitInput struct {
 }
 
 func (s *Server) handleGetUnits(w http.ResponseWriter, r *http.Request) {
+	var count int64
+	s.db.Model(&model.Unit{}).Count(&count)
+	if count == 0 {
+		for _, u := range defaultUnits {
+			u.ID = uuid.New().String()
+			u.IsActive = true
+			_ = s.db.Create(&u).Error
+		}
+	}
+
 	query := s.db.Model(&model.Unit{})
 	if r.URL.Query().Get("active_only") == "true" || r.URL.Query().Get("active_only") == "1" {
 		query = query.Where("is_active = ?", true)
@@ -188,11 +254,18 @@ func (s *Server) handleCreateUnit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code := strings.ToUpper(strings.TrimSpace(input.Code))
 	name := strings.TrimSpace(input.Name)
-	if code == "" || name == "" {
-		writeError(w, http.StatusBadRequest, "code and name are required")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
 		return
+	}
+
+	code := strings.ToUpper(strings.TrimSpace(input.Code))
+	if code == "" {
+		code = slugifyVietnamese(name)
+		if code == "" {
+			code = "UOM_" + uuid.New().String()[:8]
+		}
 	}
 
 	isActive := true
@@ -320,10 +393,16 @@ func (s *Server) handleCreateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cat.Name = strings.TrimSpace(cat.Name)
-	cat.Code = strings.TrimSpace(cat.Code)
-	if cat.Name == "" || cat.Code == "" {
-		writeError(w, http.StatusBadRequest, "name and code are required")
+	if cat.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
 		return
+	}
+	cat.Code = strings.TrimSpace(cat.Code)
+	if cat.Code == "" {
+		cat.Code = slugifyVietnamese(cat.Name)
+		if cat.Code == "" {
+			cat.Code = "CAT_" + uuid.New().String()[:8]
+		}
 	}
 	if cat.ID == "" {
 		cat.ID = uuid.New().String()
@@ -806,8 +885,252 @@ func (s *Server) handleDeletePartner(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------------------------------------------------------------------
-// Inventory Handlers
+// Inventory & Receipt Handlers
 // ----------------------------------------------------------------------------
+
+type ReceiptLineItem struct {
+	ID             string          `json:"id"`
+	VariantID      string          `json:"variant_id"`
+	ProductName    string          `json:"product_name"`
+	VariantName    string          `json:"variant_name"`
+	SKU            string          `json:"sku"`
+	BaseUom        string          `json:"base_uom"`
+	InputUom       string          `json:"input_uom"`
+	InputQty       decimal.Decimal `json:"input_qty"`
+	QtyInBaseUom   decimal.Decimal `json:"qty_in_base_uom"`
+	UnitCostAtTime decimal.Decimal `json:"unit_cost_at_time"`
+	LineTotal      decimal.Decimal `json:"line_total"`
+	BatchCode      *string         `json:"batch_code,omitempty"`
+	ExpiryDate     *time.Time      `json:"expiry_date,omitempty"`
+}
+
+type ReceiptSummary struct {
+	ReferenceID  string             `json:"reference_id"`
+	MovementType model.MovementType `json:"movement_type"`
+	CreatedAt    time.Time          `json:"created_at"`
+	ItemCount    int                `json:"item_count"`
+	TotalQty     decimal.Decimal    `json:"total_qty"`
+	TotalAmount  decimal.Decimal    `json:"total_amount"`
+	PartnerID    *string            `json:"partner_id,omitempty"`
+	PartnerName  *string            `json:"partner_name,omitempty"`
+	Notes        *string            `json:"notes,omitempty"`
+	Items        []ReceiptLineItem  `json:"items,omitempty"`
+}
+
+func (s *Server) handleGetReceipts(w http.ResponseWriter, r *http.Request) {
+	receiptType := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("type")))
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+
+	query := s.db.Model(&model.InventoryMovement{}).
+		Preload("Variant.Product").
+		Preload("Batch.Supplier").
+		Where("reference_id IS NOT NULL AND reference_id != ''")
+
+	if receiptType == "PURCHASE" {
+		query = query.Where("movement_type = ?", model.MovementTypePurchaseIn)
+	} else if receiptType == "WASTAGE" {
+		query = query.Where("movement_type = ?", model.MovementTypeWastageSpoilage)
+	} else if receiptType != "" {
+		query = query.Where("movement_type = ?", receiptType)
+	}
+
+	var movements []model.InventoryMovement
+	if err := query.Order("created_at desc").Find(&movements).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	groups := make(map[string]*ReceiptSummary)
+	orderList := make([]string, 0)
+
+	for _, m := range movements {
+		ref := ""
+		if m.ReferenceID != nil {
+			ref = *m.ReferenceID
+		}
+		if ref == "" {
+			continue
+		}
+
+		itemQty := m.InputQty.Abs()
+		lineTotal := itemQty.Mul(m.UnitCostAtTime)
+
+		pName := ""
+		vName := ""
+		sku := ""
+		baseUom := ""
+		if m.Variant != nil {
+			vName = m.Variant.VariantName
+			sku = m.Variant.Sku
+			if m.Variant.Product != nil {
+				pName = m.Variant.Product.Name
+				baseUom = m.Variant.Product.BaseUom
+			}
+		}
+
+		var bCode *string
+		var expDate *time.Time
+		var supplierID *string
+		var supplierName *string
+		if m.Batch != nil {
+			bCode = &m.Batch.BatchCode
+			expDate = m.Batch.ExpiryDate
+			if m.Batch.Supplier != nil {
+				supplierID = &m.Batch.Supplier.ID
+				supplierName = &m.Batch.Supplier.Name
+			}
+		}
+
+		lineItem := ReceiptLineItem{
+			ID:             m.ID,
+			VariantID:      m.VariantID,
+			ProductName:    pName,
+			VariantName:    vName,
+			SKU:            sku,
+			BaseUom:        baseUom,
+			InputUom:       m.InputUom,
+			InputQty:       itemQty,
+			QtyInBaseUom:   m.QtyInBaseUom.Abs(),
+			UnitCostAtTime: m.UnitCostAtTime,
+			LineTotal:      lineTotal,
+			BatchCode:      bCode,
+			ExpiryDate:     expDate,
+		}
+
+		if existing, exists := groups[ref]; exists {
+			existing.ItemCount++
+			existing.TotalQty = existing.TotalQty.Add(itemQty)
+			existing.TotalAmount = existing.TotalAmount.Add(lineTotal)
+			if existing.PartnerName == nil && supplierName != nil {
+				existing.PartnerID = supplierID
+				existing.PartnerName = supplierName
+			}
+			existing.Items = append(existing.Items, lineItem)
+		} else {
+			notes := m.ReasonNote
+			summary := &ReceiptSummary{
+				ReferenceID:  ref,
+				MovementType: m.MovementType,
+				CreatedAt:    m.CreatedAt,
+				ItemCount:    1,
+				TotalQty:     itemQty,
+				TotalAmount:  lineTotal,
+				PartnerID:    supplierID,
+				PartnerName:  supplierName,
+				Notes:        notes,
+				Items:        []ReceiptLineItem{lineItem},
+			}
+			groups[ref] = summary
+			orderList = append(orderList, ref)
+		}
+	}
+
+	result := make([]ReceiptSummary, 0, len(orderList))
+	for _, ref := range orderList {
+		g := groups[ref]
+		if q != "" {
+			refMatch := strings.Contains(strings.ToLower(g.ReferenceID), q)
+			notesMatch := g.Notes != nil && strings.Contains(strings.ToLower(*g.Notes), q)
+			partnerMatch := g.PartnerName != nil && strings.Contains(strings.ToLower(*g.PartnerName), q)
+			if !refMatch && !notesMatch && !partnerMatch {
+				continue
+			}
+		}
+		result = append(result, *g)
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleGetReceiptDetail(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "receipt id is required")
+		return
+	}
+
+	var movements []model.InventoryMovement
+	if err := s.db.Preload("Variant.Product").Preload("Batch.Supplier").
+		Where("reference_id = ?", id).
+		Order("created_at asc").Find(&movements).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if len(movements) == 0 {
+		writeError(w, http.StatusNotFound, "receipt not found")
+		return
+	}
+
+	first := movements[0]
+	totalQty := decimal.Zero
+	totalAmount := decimal.Zero
+	var supplierID *string
+	var supplierName *string
+
+	items := make([]ReceiptLineItem, 0, len(movements))
+	for _, m := range movements {
+		itemQty := m.InputQty.Abs()
+		lineTotal := itemQty.Mul(m.UnitCostAtTime)
+		totalQty = totalQty.Add(itemQty)
+		totalAmount = totalAmount.Add(lineTotal)
+
+		pName := ""
+		vName := ""
+		sku := ""
+		baseUom := ""
+		if m.Variant != nil {
+			vName = m.Variant.VariantName
+			sku = m.Variant.Sku
+			if m.Variant.Product != nil {
+				pName = m.Variant.Product.Name
+				baseUom = m.Variant.Product.BaseUom
+			}
+		}
+
+		var bCode *string
+		var expDate *time.Time
+		if m.Batch != nil {
+			bCode = &m.Batch.BatchCode
+			expDate = m.Batch.ExpiryDate
+			if supplierName == nil && m.Batch.Supplier != nil {
+				supplierID = &m.Batch.Supplier.ID
+				supplierName = &m.Batch.Supplier.Name
+			}
+		}
+
+		items = append(items, ReceiptLineItem{
+			ID:             m.ID,
+			VariantID:      m.VariantID,
+			ProductName:    pName,
+			VariantName:    vName,
+			SKU:            sku,
+			BaseUom:        baseUom,
+			InputUom:       m.InputUom,
+			InputQty:       itemQty,
+			QtyInBaseUom:   m.QtyInBaseUom.Abs(),
+			UnitCostAtTime: m.UnitCostAtTime,
+			LineTotal:      lineTotal,
+			BatchCode:      bCode,
+			ExpiryDate:     expDate,
+		})
+	}
+
+	detail := ReceiptSummary{
+		ReferenceID:  id,
+		MovementType: first.MovementType,
+		CreatedAt:    first.CreatedAt,
+		ItemCount:    len(items),
+		TotalQty:     totalQty,
+		TotalAmount:  totalAmount,
+		PartnerID:    supplierID,
+		PartnerName:  supplierName,
+		Notes:        first.ReasonNote,
+		Items:        items,
+	}
+
+	writeJSON(w, http.StatusOK, detail)
+}
 
 type PurchaseItemDTO struct {
 	VariantID  string          `json:"variant_id"`
@@ -819,10 +1142,12 @@ type PurchaseItemDTO struct {
 }
 
 type PurchaseDTO struct {
-	SupplierID  *string           `json:"supplier_id"`
-	ReferenceID *string           `json:"reference_id"`
-	Notes       *string           `json:"notes"`
-	Items       []PurchaseItemDTO `json:"items"`
+	SupplierID    *string           `json:"supplier_id"`
+	ReferenceID   *string           `json:"reference_id"`
+	Notes         *string           `json:"notes"`
+	PaymentMethod *string           `json:"payment_method,omitempty"`
+	AmountPaid    *decimal.Decimal  `json:"amount_paid,omitempty"`
+	Items         []PurchaseItemDTO `json:"items"`
 }
 
 func (s *Server) handlePurchaseReceiving(w http.ResponseWriter, r *http.Request) {
@@ -832,46 +1157,150 @@ func (s *Server) handlePurchaseReceiving(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if len(input.Items) == 0 {
+		writeError(w, http.StatusBadRequest, "items cannot be empty")
+		return
+	}
+
+	refCode := input.ReferenceID
+	if refCode == nil || strings.TrimSpace(*refCode) == "" {
+		generated := fmt.Sprintf("PO-%s-%04d", time.Now().Format("060102"), time.Now().Unix()%10000)
+		refCode = &generated
+	}
+
+	totalPurchaseAmount := decimal.Zero
+
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		for _, item := range input.Items {
+			var variant model.ProductVariant
+			if err := tx.Preload("Product").First(&variant, "id = ?", item.VariantID).Error; err != nil {
+				return err
+			}
+
+			qtyInBase := item.Qty
+			unitCostInBase := item.UnitCost
+
+			if item.UOM != "" && variant.Product != nil && item.UOM != variant.Product.BaseUom {
+				conv, err := s.uomService.ToBaseQty(r.Context(), tx, service.ToBaseQtyParams{
+					VariantID: item.VariantID,
+					InputUOM:  item.UOM,
+					InputQty:  item.Qty,
+				})
+				if err == nil && conv.GreaterThan(decimal.Zero) {
+					qtyInBase = conv
+					if !qtyInBase.IsZero() {
+						unitCostInBase = item.Qty.Mul(item.UnitCost).Div(qtyInBase)
+					}
+				}
+			}
+
 			// Calculate new WAC first before stock increment
-			if _, err := s.ledgerService.CalculateNewWAC(r.Context(), tx, item.VariantID, item.Qty, item.UnitCost); err != nil {
+			if _, err := s.ledgerService.CalculateNewWAC(r.Context(), tx, item.VariantID, qtyInBase, unitCostInBase); err != nil {
 				return err
 			}
 
 			var batchID *string
 			if item.BatchCode != nil && *item.BatchCode != "" {
-				batch := model.InventoryBatch{
-					ID:           uuid.New().String(),
-					VariantID:    item.VariantID,
-					BatchCode:    *item.BatchCode,
-					SupplierID:   input.SupplierID,
-					ReceivedDate: time.Now(),
-					ExpiryDate:   item.ExpiryDate,
-					InitialQty:   item.Qty,
-					RemainingQty: decimal.Zero,
-					UnitCost:     item.UnitCost,
+				var existingBatch model.InventoryBatch
+				if err := tx.Where("variant_id = ? AND batch_code = ?", item.VariantID, *item.BatchCode).First(&existingBatch).Error; err == nil {
+					batchID = &existingBatch.ID
+					updates := map[string]interface{}{
+						"unit_cost": unitCostInBase,
+					}
+					if item.ExpiryDate != nil {
+						updates["expiry_date"] = item.ExpiryDate
+					}
+					if err := tx.Model(&existingBatch).Updates(updates).Error; err != nil {
+						return err
+					}
+				} else {
+					batch := model.InventoryBatch{
+						ID:           uuid.New().String(),
+						VariantID:    item.VariantID,
+						BatchCode:    *item.BatchCode,
+						SupplierID:   input.SupplierID,
+						ReceivedDate: time.Now(),
+						ExpiryDate:   item.ExpiryDate,
+						InitialQty:   qtyInBase,
+						RemainingQty: decimal.Zero,
+						UnitCost:     unitCostInBase,
+					}
+					if err := tx.Create(&batch).Error; err != nil {
+						return err
+					}
+					batchID = &batch.ID
 				}
-				if err := tx.Create(&batch).Error; err != nil {
-					return err
-				}
-				batchID = &batch.ID
 			}
+
+			lineTotal := item.Qty.Mul(item.UnitCost)
+			totalPurchaseAmount = totalPurchaseAmount.Add(lineTotal)
 
 			if _, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
 				VariantID:      item.VariantID,
 				BatchID:        batchID,
 				MovementType:   model.MovementTypePurchaseIn,
-				QtyInBaseUom:   item.Qty,
+				QtyInBaseUom:   qtyInBase,
 				InputUOM:       item.UOM,
 				InputQty:       item.Qty,
-				UnitCostAtTime: item.UnitCost,
-				ReferenceID:    input.ReferenceID,
+				UnitCostAtTime: unitCostInBase,
+				ReferenceID:    refCode,
 				ReasonNote:     input.Notes,
 			}); err != nil {
 				return err
 			}
 		}
+
+		// Supplier Debt and Cashbook
+		if input.SupplierID != nil && *input.SupplierID != "" {
+			var supplier model.Partner
+			if err := tx.First(&supplier, "id = ?", *input.SupplierID).Error; err == nil {
+				paid := totalPurchaseAmount
+				if input.AmountPaid != nil {
+					paid = *input.AmountPaid
+				} else if input.PaymentMethod != nil && *input.PaymentMethod == "CREDIT" {
+					paid = decimal.Zero
+				}
+
+				debt := totalPurchaseAmount.Sub(paid)
+				if debt.GreaterThan(decimal.Zero) {
+					newDebt := supplier.CurrentDebtBalance.Add(debt)
+					debtNote := fmt.Sprintf("Nợ nhập hàng phiếu %s", *refCode)
+					debtLedger := model.DebtLedger{
+						PartnerID:       supplier.ID,
+						TransactionType: model.DebtTransactionTypeSupplierInvoice,
+						Amount:          debt,
+						BalanceAfter:    newDebt,
+						ReferenceID:     refCode,
+						Note:            &debtNote,
+					}
+					if err := tx.Create(&debtLedger).Error; err != nil {
+						return err
+					}
+					if err := tx.Model(&supplier).Update("current_debt_balance", newDebt).Error; err != nil {
+						return err
+					}
+				}
+
+				if paid.GreaterThan(decimal.Zero) {
+					cbMethod := model.CashbookPaymentMethodCash
+					if input.PaymentMethod != nil && *input.PaymentMethod == "BANK_TRANSFER" {
+						cbMethod = model.CashbookPaymentMethodBankTransfer
+					}
+					cashTx := model.CashbookTransaction{
+						TransactionType: model.CashbookTypeOutflow,
+						Category:        model.CashbookCategorySupplierPayment,
+						Amount:          paid,
+						PaymentMethod:   cbMethod,
+						PartnerID:       input.SupplierID,
+						Description:     fmt.Sprintf("Chi tiền nhập hàng phiếu %s", *refCode),
+					}
+					if err := tx.Create(&cashTx).Error; err != nil {
+						return err
+					}
+				}
+			}
+		}
+
 		return nil
 	})
 
@@ -880,7 +1309,10 @@ func (s *Server) handlePurchaseReceiving(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]string{"message": "purchase received successfully"})
+	writeJSON(w, http.StatusCreated, map[string]string{
+		"message":      "purchase received successfully",
+		"reference_id": *refCode,
+	})
 }
 
 type WastageDTO struct {
@@ -1230,9 +1662,17 @@ func (s *Server) handlePosCheckout(w http.ResponseWriter, r *http.Request) {
 			lineCogs = actualBaseQty.Mul(variant.CostPrice).Neg()
 		} else {
 			reason := fmt.Sprintf("POS sale: %s", orderNumber)
+			batchIDToUse := itemReq.BatchID
+			if (batchIDToUse == nil || *batchIDToUse == "") && variant.Product != nil && variant.Product.TrackBatches {
+				var oldestBatch model.InventoryBatch
+				if err := tx.Where("variant_id = ? AND remaining_qty > 0 AND (expiry_date IS NULL OR expiry_date > ?)", variant.ID, time.Now()).
+					Order("expiry_date ASC, received_date ASC").First(&oldestBatch).Error; err == nil {
+					batchIDToUse = &oldestBatch.ID
+				}
+			}
 			_, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
 				VariantID:      variant.ID,
-				BatchID:        itemReq.BatchID,
+				BatchID:        batchIDToUse,
 				MovementType:   model.MovementTypeSaleOut,
 				QtyInBaseUom:   actualBaseQty.Neg(),
 				InputUOM:       soldUom,
@@ -1428,6 +1868,23 @@ func (s *Server) handlePosCheckout(w http.ResponseWriter, r *http.Request) {
 			PosSessionID:    req.PosSessionID,
 			PartnerID:       req.CustomerID,
 			Description:     fmt.Sprintf("Thu tiền bán hàng POS %s", orderNumber),
+		}
+		if err := tx.Create(&cashTx).Error; err != nil {
+			tx.Rollback()
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else if paidAmount.LessThan(decimal.Zero) {
+		refundAmount := paidAmount.Abs()
+		cashTx := model.CashbookTransaction{
+			TransactionType: model.CashbookTypeOutflow,
+			Category:        model.CashbookCategorySalesRevenue,
+			Amount:          refundAmount,
+			PaymentMethod:   model.CashbookPaymentMethodCash,
+			SalesOrderID:    &orderID,
+			PosSessionID:    req.PosSessionID,
+			PartnerID:       req.CustomerID,
+			Description:     fmt.Sprintf("Hoàn tiền trả hàng POS %s", orderNumber),
 		}
 		if err := tx.Create(&cashTx).Error; err != nil {
 			tx.Rollback()

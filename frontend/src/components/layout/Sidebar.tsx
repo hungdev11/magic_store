@@ -188,6 +188,7 @@ function SidebarNavList({ pathname }: { pathname: string | null }) {
   return <SidebarNavContent pathname={pathname} searchParams={searchParams} />;
 }
 
+// ponytail: static responsive sidebar; upgrade to responsive collapsible mobile offcanvas when viewport is below 768px.
 export function Sidebar() {
   const pathname = usePathname();
   const { isModuleEnabled, storeSetting } = useStoreProfile();
@@ -197,13 +198,13 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="w-60 bg-surface-card border-r border-border-subtle flex flex-col shrink-0 min-h-screen">
+    <aside className="w-56 bg-surface-card border-r border-border-subtle flex flex-col shrink-0 min-h-screen">
       {/* Brand Header */}
       <Link
         href="/"
         className="h-14 flex items-center px-4 border-b border-border-subtle gap-2.5 hover:bg-surface-card-hover transition-colors"
       >
-        <div className="w-8 h-8 rounded-md bg-brand flex items-center justify-center text-white font-bold text-base shadow-sm">
+        <div className="w-7 h-7 rounded-md bg-brand flex items-center justify-center text-white font-bold text-sm shadow-sm">
           M
         </div>
         <div className="flex flex-col overflow-hidden">
@@ -244,7 +245,7 @@ export function Sidebar() {
           {!isModuleEnabled("catch_weight") &&
             !isModuleEnabled("matrix_variants") &&
             !isModuleEnabled("bom_production") && (
-              <span className="text-[10px] text-text-disabled italic">Chưa kích hoạt tính năng phụ</span>
+              <span className="text-[10px] text-text-disabled italic">Cơ bản</span>
             )}
         </div>
       </div>

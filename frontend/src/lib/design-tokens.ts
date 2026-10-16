@@ -30,7 +30,7 @@ export const BADGE_STYLES: Record<BadgeVariant, { bg: string; text: string; bord
   },
   alert: {
     bg: "bg-amber-50",
-    text: "text-amber-700",
+    text: "text-amber-800",
     border: "border-amber-200",
   },
   info: {

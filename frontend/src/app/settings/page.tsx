@@ -3,6 +3,12 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useStoreProfile } from "@/lib/store";
 import {
+  PageHeader,
+  Badge,
+  Button,
+  AlertBanner,
+} from "@/components/common";
+import {
   Fish,
   Shirt,
   UtensilsCrossed,
@@ -21,7 +27,6 @@ import {
   Sliders,
   Store,
   RotateCcw,
-  Sparkle,
 } from "lucide-react";
 
 // Preset definitions conforming to Phase 3 Adaptive UI spec
@@ -304,70 +309,34 @@ export default function SettingsPage() {
     <div className="space-y-8 max-w-6xl mx-auto pb-16">
       {/* Toast Notification Banner */}
       {toast && (
-        <div
-          role="alert"
-          className={`flex items-center justify-between p-4 rounded-xl border shadow-sm transition-all duration-300 ${
-            toast.type === "success"
-              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-              : toast.type === "error"
-              ? "bg-rose-50 border-rose-200 text-rose-800"
-              : "bg-sky-50 border-sky-200 text-sky-800"
-          }`}
-        >
-          <div className="flex items-center gap-3">
-            {toast.type === "success" ? (
-              <CheckCircle2 className="w-5 h-5 text-brand shrink-0" />
-            ) : toast.type === "error" ? (
-              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
-            ) : (
-              <Sparkle className="w-5 h-5 text-sky-600 shrink-0" />
-            )}
-            <span className="text-sm font-medium">{toast.message}</span>
-          </div>
-          <button
-            onClick={() => setToast(null)}
-            className="text-xs font-semibold hover:opacity-75 px-2 py-1"
-          >
-            Đóng
-          </button>
-        </div>
+        <AlertBanner
+          type={toast.type}
+          message={toast.message}
+          onClose={() => setToast(null)}
+        />
       )}
 
       {/* Screen Header */}
-      <div className="bg-surface-card rounded-2xl p-6 border border-border-subtle shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-xs font-semibold uppercase tracking-wider text-brand px-2 py-0.5 rounded bg-brand-light border border-emerald-200">
-              Cấu hình hệ thống
-            </span>
-            <span className="text-xs text-text-sub font-mono">
+      <PageHeader
+        title="Cài đặt Cửa hàng & Mô-đun Nghiệp vụ"
+        description="Bật tắt linh hoạt theo đặc thù kinh doanh: Hải sản/Cân ký, Thời trang/Size-Màu, F&B/Định mức chế biến."
+        badge={
+          <div className="flex items-center gap-2">
+            <Badge variant="brand">
               {activeModuleCount}/7 Tính năng đang bật
-            </span>
-          </div>
-          <h1 className="text-2xl font-bold text-text-main">
-            Cài đặt Cửa hàng & Mô-đun Nghiệp vụ
-          </h1>
-          <p className="text-sm text-text-sub mt-1 max-w-2xl">
-            Bật tắt linh hoạt theo đặc thù kinh doanh: Hải sản/Cân ký, Thời trang/Size-Màu, F&B/Định mức chế biến
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {activePresetKey ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg">
-              <span className="w-2 h-2 rounded-full bg-brand animate-pulse" />
-              <span className="text-xs font-semibold text-brand">
+            </Badge>
+            {activePresetKey ? (
+              <Badge variant="brand">
                 Mẫu: {PRESETS.find((p) => p.key === activePresetKey)?.subtitle}
-              </span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-muted border border-border-subtle rounded-lg">
-              <span className="w-2 h-2 rounded-full bg-slate-400" />
-              <span className="text-xs font-medium text-text-sub">Cấu hình Tùy chỉnh (Custom)</span>
-            </div>
-          )}
-        </div>
-      </div>
+              </Badge>
+            ) : (
+              <Badge variant="default">
+                Tùy chỉnh (Custom)
+              </Badge>
+            )}
+          </div>
+        }
+      />
 
       {/* SECTION 1: 1-Click Industry Presets */}
       <section className="space-y-4">
