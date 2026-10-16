@@ -200,9 +200,12 @@ export default function PurchaseOrderPage() {
       });
     }
 
+    const isBatchActive = trackBatches || isModuleEnabled("batch_expiry");
     const todayStr = new Date().toISOString().slice(2, 10).replace(/-/g, "");
     const rowCount = items.length + 1;
-    const defaultBatch = `LOT-${todayStr}-${String(rowCount).padStart(2, "0")}`;
+    const defaultBatch = isBatchActive
+      ? `LOT-${todayStr}-${String(rowCount).padStart(2, "0")}`
+      : "";
 
     const newRow: PurchaseItemRow = {
       rowId: `row-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -220,7 +223,7 @@ export default function PurchaseOrderPage() {
       unitCost: costPrice > 0 ? costPrice : 0,
       batchCode: defaultBatch,
       expiryDate: "",
-      trackBatches: trackBatches || isModuleEnabled("batch_expiry"),
+      trackBatches: isBatchActive,
       availableUoms,
     };
 
@@ -330,6 +333,11 @@ export default function PurchaseOrderPage() {
     setSubmitSuccess(null);
 
     // Validations
+    if (!supplierId) {
+      setSubmitError("Vui lòng chọn hoặc thêm mới Nhà cung cấp.");
+      return;
+    }
+
     if (items.length === 0) {
       setSubmitError("Vui lòng thêm ít nhất một mặt hàng vào phiếu nhập kho.");
       return;
@@ -364,24 +372,39 @@ export default function PurchaseOrderPage() {
     setIsSubmitting(true);
 
     try {
+      const noteParts = [
+        notes.trim(),
+        `Ngày nhập: ${purchaseDate}`,
+        `PT: ${paymentMethod}`,
+        `Đã thanh toán: ${formatVND(amountPaid)}`,
+      ].filter(Boolean);
+
       const purchasePayload: PurchaseInput = {
         supplier_id: supplierId || undefined,
         reference_id: referenceCode.trim() || undefined,
-        notes: notes.trim()
-          ? `${notes.trim()} | PT: ${paymentMethod} | Đã thanh toán: ${formatVND(
-              amountPaid
-            )}`
-          : `PT: ${paymentMethod} | Đã thanh toán: ${formatVND(amountPaid)}`,
-        items: items.map((item) => ({
-          variant_id: item.variantId,
-          qty: Number(item.qty),
-          unit_cost: Number(item.unitCost),
-          uom: item.selectedUom || item.baseUom,
-          batch_code: item.batchCode.trim() || undefined,
-          expiry_date: item.expiryDate
-            ? `${item.expiryDate}T00:00:00Z`
-            : undefined,
-        })),
+        notes: noteParts.join(" | "),
+        items: items.map((item) => {
+          const baseQty = Number(item.qty) * (item.conversionFactor || 1);
+          const baseUnitCost =
+            item.conversionFactor > 0
+              ? Number(item.unitCost) / item.conversionFactor
+              : Number(item.unitCost);
+
+          return {
+            variant_id: item.variantId,
+            qty: baseQty,
+            unit_cost: baseUnitCost,
+            uom: item.baseUom,
+            batch_code:
+              (item.trackBatches || isModuleEnabled("batch_expiry")) &&
+              item.batchCode.trim()
+                ? item.batchCode.trim()
+                : undefined,
+            expiry_date: item.expiryDate
+              ? `${item.expiryDate}T00:00:00Z`
+              : undefined,
+          };
+        }),
       };
 
       await api.purchaseStock(purchasePayload);
@@ -585,7 +608,11 @@ export default function PurchaseOrderPage() {
                     <div className="flex justify-between text-text-sub">
                       <span>Nợ NCC hiện tại:</span>
                       <span className="font-semibold text-rose-700">
-                        {formatVND(selectedSupplier.current_debt)}
+                        {formatVND(
+                          (selectedSupplier as any).current_debt_balance ??
+                            selectedSupplier.current_debt ??
+                            0
+                        )}
                       </span>
                     </div>
                     {selectedSupplier.phone && (
