@@ -1,4 +1,5 @@
 import {
+  Prisma,
   PrismaClient,
   CostingMethod,
   ProductType,
@@ -436,6 +437,7 @@ export async function seedSeafoodStore(client: PrismaClient): Promise<void> {
             actual_base_qty_deducted: 1.35,
             original_unit_price: 160000,
             actual_unit_price: 150000,
+            line_total: new Prisma.Decimal("202500"),
             line_cogs: 148500,
             is_return: false,
           },
@@ -574,6 +576,9 @@ export async function seedApparelStore(client: PrismaClient): Promise<void> {
     data: {
       cashier_name: 'Thu Ngân Thời Trang',
       opening_cash: 1000000,
+      total_sales_amount: 30000,
+      total_cash_collected: 0,
+      total_bank_collected: 0,
       status: PosSessionStatus.OPEN,
     },
   });
@@ -599,6 +604,7 @@ export async function seedApparelStore(client: PrismaClient): Promise<void> {
             actual_base_qty_deducted: -1,
             original_unit_price: 350000,
             actual_unit_price: 350000,
+            line_total: new Prisma.Decimal("-350000"),
             line_cogs: -180000,
             is_return: true,
           },
@@ -609,6 +615,7 @@ export async function seedApparelStore(client: PrismaClient): Promise<void> {
             actual_base_qty_deducted: 1,
             original_unit_price: 380000,
             actual_unit_price: 380000,
+            line_total: new Prisma.Decimal("380000"),
             line_cogs: 190000,
             is_return: false,
           },
@@ -983,6 +990,7 @@ export async function seedFoodStore(client: PrismaClient): Promise<void> {
             actual_base_qty_deducted: 1,
             original_unit_price: 30000,
             actual_unit_price: 45000,
+            line_total: new Prisma.Decimal("45000"),
             modifiers_json: [
               { name: 'Thêm Trứng Ốp La', price: 10000, deduct_qty: 1, uom: 'Quả', linked_sku: 'RAW-TRUNG-GA' },
               { name: 'Thêm Pate', price: 5000, deduct_qty: 0.02, uom: 'kg', linked_sku: 'RAW-PATE' },
@@ -1048,6 +1056,16 @@ export async function seedFoodStore(client: PrismaClient): Promise<void> {
         unit_cost_at_time: 100000,
         reference_id: orderFnb.id,
         reason_note: 'Backflush topping: 0.02kg pate thêm cho đơn HD-FNB-001',
+      },
+      {
+        variant_id: varBanhMi.id,
+        movement_type: MovementType.PRODUCTION_YIELD,
+        qty_in_base_uom: 1,
+        input_uom: 'Ổ',
+        input_qty: 1,
+        unit_cost_at_time: 15384,
+        reference_id: orderFnb.id,
+        reason_note: 'Tức thời sản xuất 1 Bánh Mì Thập Cẩm (POS Backflush)',
       },
       {
         variant_id: varBanhMi.id,

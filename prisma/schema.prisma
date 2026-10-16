@@ -128,7 +128,7 @@ model Category {
   name       String
   code       String     @unique
   parent_id  String?
-  parent     Category?  @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  parent     Category?  @relation("CategoryHierarchy", fields: [parent_id], references: [id], onDelete: Cascade)
   children   Category[] @relation("CategoryHierarchy")
   products   Product[]
   created_at DateTime   @default(now())
@@ -151,6 +151,9 @@ model Product {
   modifier_groups ProductModifierGroup[]
   created_at      DateTime               @default(now())
   updated_at      DateTime               @updatedAt
+
+  @@index([category_id])
+  @@index([product_type])
 }
 
 model ProductVariant {
@@ -175,6 +178,10 @@ model ProductVariant {
   modifier_items        ModifierItem[]
   created_at            DateTime            @default(now())
   updated_at            DateTime            @updatedAt
+
+  @@index([product_id])
+  @@index([sku])
+  @@index([barcode])
 }
 
 model UomConversion {
@@ -246,6 +253,9 @@ model InventoryBatch {
   updated_at    DateTime            @updatedAt
 
   @@unique([variant_id, batch_code])
+  @@index([variant_id])
+  @@index([supplier_id])
+  @@index([expiry_date])
 }
 
 model InventoryMovement {
@@ -262,6 +272,12 @@ model InventoryMovement {
   reference_id      String?
   reason_note       String?
   created_at        DateTime        @default(now())
+
+  @@index([variant_id])
+  @@index([batch_id])
+  @@index([reference_id])
+  @@index([movement_type])
+  @@index([created_at])
 }
 
 model BomRecipe {
@@ -275,6 +291,8 @@ model BomRecipe {
   production_orders        ProductionOrder[]
   created_at               DateTime          @default(now())
   updated_at               DateTime          @updatedAt
+
+  @@index([target_variant_id])
 }
 
 model BomItem {
@@ -287,6 +305,10 @@ model BomItem {
   cost_allocation_percent Decimal        @default(0) @db.Decimal(5, 2)
   created_at              DateTime       @default(now())
   updated_at              DateTime       @updatedAt
+
+  @@unique([recipe_id, component_variant_id])
+  @@index([recipe_id])
+  @@index([component_variant_id])
 }
 
 model ProductionOrder {
@@ -302,6 +324,9 @@ model ProductionOrder {
   notes               String?
   created_at          DateTime         @default(now())
   updated_at          DateTime         @updatedAt
+
+  @@index([recipe_id])
+  @@index([status])
 }
 
 model Partner {
@@ -358,6 +383,11 @@ model SalesOrder {
   cashbook_entries CashbookTransaction[]
   created_at       DateTime              @default(now())
   updated_at       DateTime              @updatedAt
+
+  @@index([customer_id])
+  @@index([pos_session_id])
+  @@index([status])
+  @@index([created_at])
 }
 
 model SalesOrderItem {
@@ -373,10 +403,15 @@ model SalesOrderItem {
   actual_base_qty_deducted Decimal         @db.Decimal(12, 4)
   original_unit_price      Decimal         @db.Decimal(15, 2)
   actual_unit_price        Decimal         @db.Decimal(15, 2)
+  line_total               Decimal         @default(0) @db.Decimal(15, 2)
   modifiers_json           Json?           @db.JsonB
   line_cogs                Decimal         @default(0) @db.Decimal(15, 2)
   is_return                Boolean         @default(false)
   created_at               DateTime        @default(now())
+
+  @@index([order_id])
+  @@index([variant_id])
+  @@index([batch_id])
 }
 
 model DebtLedger {
@@ -389,6 +424,10 @@ model DebtLedger {
   balance_after    Decimal             @db.Decimal(15, 2)
   note             String?
   created_at       DateTime            @default(now())
+
+  @@index([partner_id])
+  @@index([reference_id])
+  @@index([created_at])
 }
 
 model CashbookTransaction {
@@ -405,4 +444,10 @@ model CashbookTransaction {
   pos_session      PosSession?           @relation(fields: [pos_session_id], references: [id])
   description      String
   created_at       DateTime              @default(now())
+
+  @@index([partner_id])
+  @@index([sales_order_id])
+  @@index([pos_session_id])
+  @@index([category])
+  @@index([created_at])
 }
