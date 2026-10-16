@@ -25,6 +25,7 @@ func setupAPITestServer(t *testing.T) (*api.Server, *gorm.DB) {
 
 	err = db.AutoMigrate(
 		&model.StoreSetting{},
+		&model.Unit{},
 		&model.Category{},
 		&model.Product{},
 		&model.ProductVariant{},

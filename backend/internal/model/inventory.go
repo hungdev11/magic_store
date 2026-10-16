@@ -21,6 +21,7 @@ type InventoryBatch struct {
 	InitialQty   decimal.Decimal     `gorm:"type:decimal(12,4);not null" json:"initial_qty"`
 	RemainingQty decimal.Decimal     `gorm:"type:decimal(12,4);not null" json:"remaining_qty"`
 	UnitCost     decimal.Decimal     `gorm:"type:decimal(15,2);not null" json:"unit_cost"`
+	Notes        string              `json:"notes,omitempty"`
 	Movements    []InventoryMovement `gorm:"foreignKey:BatchID" json:"movements,omitempty"`
 	OrderItems   []SalesOrderItem    `gorm:"foreignKey:BatchID" json:"order_items,omitempty"`
 	CreatedAt    time.Time           `json:"created_at"`

@@ -123,10 +123,23 @@ model StoreSetting {
   updated_at      DateTime      @updatedAt
 }
 
+model Unit {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@index([code])
+}
+
 model Category {
   id         String     @id @default(cuid())
   name       String
   code       String     @unique
+  is_active  Boolean    @default(true)
   parent_id  String?
   parent     Category?  @relation("CategoryHierarchy", fields: [parent_id], references: [id], onDelete: Cascade)
   children   Category[] @relation("CategoryHierarchy")
@@ -247,6 +260,7 @@ model InventoryBatch {
   initial_qty   Decimal             @db.Decimal(12, 4)
   remaining_qty Decimal             @db.Decimal(12, 4)
   unit_cost     Decimal             @db.Decimal(15, 2)
+  notes         String?
   movements     InventoryMovement[]
   order_items   SalesOrderItem[]
   created_at    DateTime            @default(now())
@@ -338,6 +352,7 @@ model Partner {
   price_tier           String                @default("RETAIL")
   current_debt_balance Decimal               @default(0) @db.Decimal(15, 2)
   credit_limit         Decimal               @default(0) @db.Decimal(15, 2)
+  is_active            Boolean               @default(true)
   supplied_batches     InventoryBatch[]
   orders               SalesOrder[]
   debt_entries         DebtLedger[]

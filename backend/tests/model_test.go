@@ -17,6 +17,7 @@ func TestModelMigration(t *testing.T) {
 
 	models := []interface{}{
 		&model.StoreSetting{},
+		&model.Unit{},
 		&model.Category{},
 		&model.Product{},
 		&model.ProductVariant{},
@@ -37,8 +38,8 @@ func TestModelMigration(t *testing.T) {
 		&model.CashbookTransaction{},
 	}
 
-	if len(models) != 19 {
-		t.Fatalf("expected 19 models, got %d", len(models))
+	if len(models) != 20 {
+		t.Fatalf("expected 20 models, got %d", len(models))
 	}
 
 	err = db.AutoMigrate(models...)
@@ -98,3 +99,67 @@ func TestModelCRUD(t *testing.T) {
 		t.Fatalf("expected variant ID to be auto-generated")
 	}
 }
+
+func TestPhase1Models_UnitAndExtensions(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Test Unit model
+	unit := model.Unit{
+		Code:        "KG",
+		Name:        "Kilogram",
+		Description: "Đơn vị khối lượng tiêu chuẩn",
+		IsActive:    true,
+	}
+	if err := db.Create(&unit).Error; err != nil {
+		t.Fatalf("failed to create unit: %v", err)
+	}
+	if unit.ID == "" {
+		t.Errorf("expected auto-generated ID for unit")
+	}
+
+	// Test Category.IsActive
+	cat := model.Category{
+		Name:     "Hải Sản Tươi",
+		Code:     "SEAFOOD_TEST",
+		IsActive: true,
+	}
+	if err := db.Create(&cat).Error; err != nil {
+		t.Fatalf("failed to create category: %v", err)
+	}
+
+	// Test Partner.IsActive
+	partner := model.Partner{
+		PartnerType: model.PartnerTypeSupplier,
+		Name:        "NCC Biển Đông",
+		IsActive:    true,
+	}
+	if err := db.Create(&partner).Error; err != nil {
+		t.Fatalf("failed to create partner: %v", err)
+	}
+
+	var loadedCat model.Category
+	if err := db.First(&loadedCat, "code = ?", "SEAFOOD_TEST").Error; err != nil {
+		t.Fatalf("failed to load cat: %v", err)
+	}
+	if !loadedCat.IsActive {
+		t.Errorf("expected loadedCat.IsActive to be true")
+	}
+
+	// Test InventoryBatch.Notes
+	batch := model.InventoryBatch{
+		VariantID: "v_test",
+		BatchCode: "BATCH_TEST",
+		Notes:     "Ghi chú kiểm tra lô",
+	}
+	if err := db.Create(&batch).Error; err != nil {
+		t.Fatalf("failed to create batch: %v", err)
+	}
+	var loadedBatch model.InventoryBatch
+	if err := db.First(&loadedBatch, "batch_code = ?", "BATCH_TEST").Error; err != nil {
+		t.Fatalf("failed to load batch: %v", err)
+	}
+	if loadedBatch.Notes != "Ghi chú kiểm tra lô" {
+		t.Errorf("expected batch notes %q, got %q", "Ghi chú kiểm tra lô", loadedBatch.Notes)
+	}
+}
+

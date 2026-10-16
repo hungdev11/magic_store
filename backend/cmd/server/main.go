@@ -36,6 +36,7 @@ func main() {
 
 	if err := db.AutoMigrate(
 		&model.StoreSetting{},
+		&model.Unit{},
 		&model.Category{},
 		&model.Product{},
 		&model.ProductVariant{},

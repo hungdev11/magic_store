@@ -13,6 +13,7 @@ type Category struct {
 	ID        string     `gorm:"primaryKey;size:64" json:"id"`
 	Name      string     `gorm:"not null" json:"name"`
 	Code      string     `gorm:"uniqueIndex;not null" json:"code"`
+	IsActive  bool       `gorm:"default:true" json:"is_active"`
 	ParentID  *string    `gorm:"size:64" json:"parent_id,omitempty"`
 	Parent    *Category  `gorm:"foreignKey:ParentID;constraint:OnDelete:CASCADE" json:"parent,omitempty"`
 	Children  []Category `gorm:"foreignKey:ParentID" json:"children,omitempty"`
