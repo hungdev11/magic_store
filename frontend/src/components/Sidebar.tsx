@@ -1,22 +1,24 @@
 "use client";
 
-import React from "react";
+import React, { Suspense } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useStoreProfile } from "@/lib/store";
 import {
   LayoutDashboard,
   Package,
-  ArrowDownToLine,
-  Factory,
-  Trash2,
-  Settings,
+  FolderTree,
   Scale,
+  Boxes,
+  ArrowDownToLine,
+  Trash2,
+  Truck,
+  Users,
+  ShoppingCart,
+  Factory,
+  Settings,
   Sparkles,
   Layers,
-  WalletCards,
-  ShoppingCart,
-  CalendarClock,
 } from "lucide-react";
 
 interface NavItem {
@@ -24,7 +26,166 @@ interface NavItem {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   badge?: string;
-  moduleKey?: string;
+}
+
+interface NavGroup {
+  title: string;
+  items: NavItem[];
+}
+
+const navGroups: NavGroup[] = [
+  {
+    title: "Hàng hóa & Danh mục",
+    items: [
+      { name: "Sản phẩm", href: "/products", icon: Package },
+      { name: "Danh mục", href: "/categories", icon: FolderTree },
+      { name: "Đơn vị tính", href: "/units", icon: Scale },
+    ],
+  },
+  {
+    title: "Kho & Vật tư",
+    items: [
+      { name: "Quản lý Lô & HSD", href: "/inventory/batches", icon: Boxes },
+      { name: "Nhập kho", href: "/inventory/purchase", icon: ArrowDownToLine },
+      { name: "Xuất hủy", href: "/inventory/wastage", icon: Trash2 },
+    ],
+  },
+  {
+    title: "Đối tác",
+    items: [
+      { name: "Nhà cung cấp", href: "/partners?type=SUPPLIER", icon: Truck },
+      { name: "Khách hàng", href: "/partners?type=CUSTOMER", icon: Users },
+    ],
+  },
+  {
+    title: "Bán hàng & Chế biến",
+    items: [
+      { name: "Bán hàng POS", href: "/pos", icon: ShoppingCart, badge: "POS" },
+      { name: "Định mức BOM", href: "/production", icon: Factory },
+    ],
+  },
+  {
+    title: "Hệ thống",
+    items: [
+      { name: "Cài đặt", href: "/settings", icon: Settings },
+    ],
+  },
+];
+
+function checkItemActive(
+  itemHref: string,
+  pathname: string | null,
+  searchParams: ReturnType<typeof useSearchParams> | null
+): boolean {
+  if (!pathname) return false;
+  const [itemPath, itemQuery] = itemHref.split("?");
+
+  const pathMatches =
+    itemPath === "/"
+      ? pathname === "/"
+      : pathname === itemPath || pathname.startsWith(itemPath + "/");
+
+  if (!pathMatches) return false;
+
+  if (itemQuery) {
+    const q = new URLSearchParams(itemQuery);
+    for (const [key, val] of q.entries()) {
+      const currentVal = searchParams?.get(key) ?? null;
+      if (itemPath === "/partners" && key === "type" && val === "CUSTOMER") {
+        if (currentVal !== "CUSTOMER" && currentVal !== null) {
+          return false;
+        }
+      } else if (currentVal !== val) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  if (pathname === "/partners" && searchParams?.get("type")) {
+    return false;
+  }
+
+  return true;
+}
+
+function SidebarNavContent({
+  pathname,
+  searchParams,
+}: {
+  pathname: string | null;
+  searchParams: ReturnType<typeof useSearchParams> | null;
+}) {
+  const isOverviewActive = checkItemActive("/", pathname, searchParams);
+
+  return (
+    <nav className="flex-1 px-3 py-2 space-y-3 overflow-y-auto">
+      <div>
+        <Link
+          href="/"
+          className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+            isOverviewActive
+              ? "bg-surface-app text-brand font-semibold"
+              : "text-text-sub hover:bg-surface-card-hover hover:text-text-main"
+          }`}
+        >
+          <LayoutDashboard
+            className={`w-4 h-4 shrink-0 ${isOverviewActive ? "text-brand" : "text-text-sub"}`}
+          />
+          <span className="truncate">Tổng quan</span>
+        </Link>
+      </div>
+
+      {navGroups.map((group) => (
+        <div key={group.title} className="space-y-0.5">
+          <div className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-text-disabled">
+            {group.title}
+          </div>
+          {group.items.map((item) => {
+            const isActive = checkItemActive(item.href, pathname, searchParams);
+            const Icon = item.icon;
+
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  isActive
+                    ? "bg-surface-app text-brand font-semibold"
+                    : "text-text-sub hover:bg-surface-card-hover hover:text-text-main"
+                }`}
+              >
+                <div className="flex items-center gap-2.5 truncate">
+                  <Icon
+                    className={`w-4 h-4 shrink-0 ${
+                      isActive ? "text-brand" : "text-text-sub"
+                    }`}
+                  />
+                  <span className="truncate">{item.name}</span>
+                </div>
+                {item.badge && (
+                  <span
+                    className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-sm ${
+                      isActive
+                        ? "bg-brand/10 text-brand"
+                        : "bg-surface-muted text-text-sub"
+                    }`}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+function SidebarNavList({ pathname }: { pathname: string | null }) {
+  const searchParams = useSearchParams();
+  return <SidebarNavContent pathname={pathname} searchParams={searchParams} />;
 }
 
 export function Sidebar() {
@@ -35,152 +196,55 @@ export function Sidebar() {
     return null;
   }
 
-  const navItems: NavItem[] = [
-    {
-      name: "Bán hàng POS",
-      href: "/pos",
-      icon: ShoppingCart,
-      badge: "POS",
-    },
-    {
-      name: "Tổng quan",
-      href: "/",
-      icon: LayoutDashboard,
-    },
-    {
-      name: "Sản phẩm & Hàng hóa",
-      href: "/products",
-      icon: Package,
-    },
-    {
-      name: "Nhập hàng (PO)",
-      href: "/inventory/purchase",
-      icon: ArrowDownToLine,
-    },
-  ];
-
-  // Conditional routes based on enabled_modules
-  if (isModuleEnabled("bom_production")) {
-    navItems.push({
-      name: "Chế biến & Phân rã",
-      href: "/production",
-      icon: Factory,
-      badge: "BOM",
-    });
-  }
-
-  // Batches & Wastage are available when batch_expiry is active
-  if (isModuleEnabled("batch_expiry")) {
-    navItems.push({
-      name: "Quản lý Lô & HSD",
-      href: "/inventory/batches",
-      icon: CalendarClock,
-      badge: "Lô/Hạn",
-    });
-    navItems.push({
-      name: "Hủy hàng & Hao hụt",
-      href: "/inventory/wastage",
-      icon: Trash2,
-      badge: "Lô/Hạn",
-    });
-  }
-
-  // Credit ledger is available when credit_ledger is active
-  if (isModuleEnabled("credit_ledger")) {
-    navItems.push({
-      name: "Sổ nợ & Đối tác",
-      href: "/partners",
-      icon: WalletCards,
-      badge: "Công nợ",
-    });
-  }
-
-  // Settings is always available
-  navItems.push({
-    name: "Cài đặt Cửa hàng",
-    href: "/settings",
-    icon: Settings,
-  });
-
   return (
-    <aside className="w-64 bg-surface-card border-r border-border-subtle flex flex-col shrink-0 min-h-screen">
+    <aside className="w-60 bg-surface-card border-r border-border-subtle flex flex-col shrink-0 min-h-screen">
       {/* Brand Header */}
-      <div className="h-16 flex items-center px-6 border-b border-border-subtle gap-3">
-        <div className="w-9 h-9 rounded-lg bg-brand flex items-center justify-center text-white font-bold text-lg shadow-sm">
+      <Link
+        href="/"
+        className="h-14 flex items-center px-4 border-b border-border-subtle gap-2.5 hover:bg-surface-card-hover transition-colors"
+      >
+        <div className="w-8 h-8 rounded-md bg-brand flex items-center justify-center text-white font-bold text-base shadow-sm">
           M
         </div>
         <div className="flex flex-col overflow-hidden">
-          <span className="font-semibold text-text-main text-sm truncate">
+          <span className="font-semibold text-text-main text-xs truncate">
             {storeSetting?.name || "Magic Store"}
           </span>
-          <span className="text-xs text-text-sub font-mono">Micro-ERP</span>
+          <span className="text-[10px] text-text-sub font-mono">Micro-ERP</span>
         </div>
-      </div>
+      </Link>
 
-      {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        <div className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-text-disabled">
-          Phân hệ tác nghiệp
-        </div>
-
-        {navItems.map((item) => {
-          const isActive = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href));
-          const Icon = item.icon;
-
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isActive
-                  ? "bg-brand text-white shadow-sm"
-                  : "text-text-sub hover:bg-surface-card-hover hover:text-text-main"
-              }`}
-            >
-              <div className="flex items-center gap-3 truncate">
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? "text-white" : "text-text-sub"}`} />
-                <span className="truncate">{item.name}</span>
-              </div>
-              {item.badge && (
-                <span
-                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                    isActive ? "bg-white/20 text-white" : "bg-emerald-50 text-brand"
-                  }`}
-                >
-                  {item.badge}
-                </span>
-              )}
-            </Link>
-          );
-        })}
-      </nav>
+      {/* Navigation Groups with Suspense for SearchParams */}
+      <Suspense fallback={<SidebarNavContent pathname={pathname} searchParams={null} />}>
+        <SidebarNavList pathname={pathname} />
+      </Suspense>
 
       {/* Module Badges Summary Footer */}
-      <div className="p-4 border-t border-border-subtle bg-surface-muted/50">
-        <div className="text-xs font-medium text-text-sub mb-2 flex items-center gap-1.5">
+      <div className="p-3 border-t border-border-subtle bg-surface-muted/30">
+        <div className="text-[11px] font-medium text-text-sub mb-1.5 flex items-center gap-1.5">
           <Sparkles className="w-3.5 h-3.5 text-brand" />
           <span>Mô-đun đang mở</span>
         </div>
         <div className="flex flex-wrap gap-1">
           {isModuleEnabled("catch_weight") && (
-            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-cyan-50 text-cyan-700 border border-cyan-200 rounded font-medium">
+            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-cyan-50 text-cyan-700 border border-cyan-200 rounded-sm font-medium">
               <Scale className="w-2.5 h-2.5" /> Cân ký
             </span>
           )}
           {isModuleEnabled("matrix_variants") && (
-            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded font-medium">
+            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-sm font-medium">
               <Layers className="w-2.5 h-2.5" /> Ma trận
             </span>
           )}
           {isModuleEnabled("bom_production") && (
-            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded font-medium">
+            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-sm font-medium">
               <Factory className="w-2.5 h-2.5" /> Chế biến
             </span>
           )}
           {!isModuleEnabled("catch_weight") &&
             !isModuleEnabled("matrix_variants") &&
             !isModuleEnabled("bom_production") && (
-              <span className="text-[11px] text-text-disabled italic">Chưa kích hoạt tính năng phụ</span>
+              <span className="text-[10px] text-text-disabled italic">Chưa kích hoạt tính năng phụ</span>
             )}
         </div>
       </div>
