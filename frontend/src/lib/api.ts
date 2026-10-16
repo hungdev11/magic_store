@@ -265,6 +265,7 @@ export const api = {
 
   // BOM & Production
   getBomRecipes: () => request<BomRecipe[]>("/bom/recipes"),
+  getRecipes: () => request<BomRecipe[]>("/bom/recipes"),
   createBomRecipe: (data: CreateBomRecipeInput) =>
     request<BomRecipe>("/bom/recipes", {
       method: "POST",
