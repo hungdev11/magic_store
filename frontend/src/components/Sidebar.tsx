@@ -16,6 +16,7 @@ import {
   Layers,
   WalletCards,
   ShoppingCart,
+  CalendarClock,
 } from "lucide-react";
 
 interface NavItem {
@@ -68,8 +69,14 @@ export function Sidebar() {
     });
   }
 
-  // Wastage is available when batch_expiry is active or general loss tracking
+  // Batches & Wastage are available when batch_expiry is active
   if (isModuleEnabled("batch_expiry")) {
+    navItems.push({
+      name: "Quản lý Lô & HSD",
+      href: "/inventory/batches",
+      icon: CalendarClock,
+      badge: "Lô/Hạn",
+    });
     navItems.push({
       name: "Hủy hàng & Hao hụt",
       href: "/inventory/wastage",

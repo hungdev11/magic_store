@@ -48,6 +48,7 @@ export interface UomConversion {
 export interface ProductVariant {
   id: string;
   product_id?: string;
+  product?: Product;
   sku: string;
   barcode?: string;
   variant_name?: string;
