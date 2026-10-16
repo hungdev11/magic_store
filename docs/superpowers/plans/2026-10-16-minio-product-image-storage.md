@@ -1,6 +1,6 @@
 # MinIO Product & Variant Image Storage Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Tích hợp dịch vụ lưu trữ đối tượng MinIO cục bộ (qua Docker Compose), cung cấp endpoint ký Presigned PUT URL từ backend Go, cập nhật model `Product` và `ProductVariant` lưu URL ảnh, và xây dựng component Upload ảnh trực tiếp trên giao diện sản phẩm và POS.
 
@@ -31,7 +31,7 @@
 - Produces: MinIO service container trên port 9000 & 9001.
 - Produces: Trường `ImageURL` & `Images` trên model `Product`, trường `ImageURL` trên `ProductVariant`.
 
-- [ ] **Step 1: Cấu hình `docker-compose.yml`**
+- [x] **Step 1: Cấu hình `docker-compose.yml`**
 
 Tạo file `docker-compose.yml`:
 ```yaml
@@ -70,14 +70,14 @@ volumes:
   minio_data:
 ```
 
-- [ ] **Step 2: Thêm MinIO Go SDK vào `backend/go.mod`**
+- [x] **Step 2: Thêm MinIO Go SDK vào `backend/go.mod`**
 
 Chạy lệnh cài đặt SDK:
 ```bash
 cd backend && /usr/local/go/bin/go get github.com/minio/minio-go/v7@v7.0.80
 ```
 
-- [ ] **Step 3: Cập nhật model `Product` và `ProductVariant`**
+- [x] **Step 3: Cập nhật model `Product` và `ProductVariant`**
 
 Trong `backend/internal/model/product.go`:
 ```go
@@ -91,12 +91,12 @@ ImageURL       string                 `gorm:"size:512" json:"image_url,omitempty
 
 Đồng thời cập nhật `prisma/schema.prisma` cho model `Product` (`image_url String?`, `images Json? @default("[]")`) và `ProductVariant` (`image_url String?`).
 
-- [ ] **Step 4: Kiểm tra migration và tests hiện tại của Go**
+- [x] **Step 4: Kiểm tra migration và tests hiện tại của Go**
 
 Chạy: `cd backend && /usr/local/go/bin/go test -v ./...`  
 Kỳ vọng: PASS (các test model CRUD tự động chạy AutoMigrate thêm cột mới).
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```bash
 git add docker-compose.yml backend/go.mod backend/go.sum backend/internal/model/product.go prisma/schema.prisma
@@ -117,7 +117,7 @@ git commit -m "feat(infra): add minio docker-compose and extend product models w
 - Produces: `StorageService` với phương thức `GetPresignedUploadURL(ctx, filename, contentType)`
 - Produces: Endpoint `POST /api/upload/presigned-url` trả về `upload_url`, `file_url`, `object_name`.
 
-- [ ] **Step 1: Viết test failing cho Presigned URL Endpoint**
+- [x] **Step 1: Viết test failing cho Presigned URL Endpoint**
 
 Tạo `backend/tests/storage_api_test.go`:
 ```go
@@ -172,12 +172,12 @@ func TestStorageAPI_PresignedUploadURL(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Chạy test để xác nhận FAIL**
+- [x] **Step 2: Chạy test để xác nhận FAIL**
 
 Chạy: `cd backend && /usr/local/go/bin/go test -v -run TestStorageAPI_PresignedUploadURL ./tests`  
 Kỳ vọng: FAIL (endpoint chưa được cấu hình).
 
-- [ ] **Step 3: Cài đặt `StorageService` trong `backend/internal/service/storage_service.go`**
+- [x] **Step 3: Cài đặt `StorageService` trong `backend/internal/service/storage_service.go`**
 
 ```go
 package service
@@ -289,7 +289,7 @@ func (s *StorageService) GetPresignedUploadURL(ctx context.Context, filename, co
 }
 ```
 
-- [ ] **Step 4: Thêm API Handler & Route trong Backend**
+- [x] **Step 4: Thêm API Handler & Route trong Backend**
 
 1. Trong `backend/internal/api/routes.go`: Thêm `mux.HandleFunc("POST /api/upload/presigned-url", s.handleGetPresignedUploadURL)`.
 2. Trong `backend/internal/api/handlers.go`:
@@ -321,12 +321,12 @@ func (s *Server) handleGetPresignedUploadURL(w http.ResponseWriter, r *http.Requ
 ```
 3. Cập nhật `setupTestServerWithDB` để tích hợp `storageService`.
 
-- [ ] **Step 5: Chạy test để xác nhận PASS**
+- [x] **Step 5: Chạy test để xác nhận PASS**
 
 Chạy: `cd backend && /usr/local/go/bin/go test -v -run TestStorageAPI_PresignedUploadURL ./tests`  
 Kỳ vọng: PASS.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add backend/internal/service/storage_service.go backend/internal/api/ backend/tests/storage_api_test.go
@@ -347,7 +347,7 @@ git commit -m "feat(backend): implement storage service and presigned upload url
 - Produces: `api.uploadFileToMinIO(uploadUrl, file)`
 - Produces: `ImageUploader` component (`value`, `onChange`, `onRemove`, `label`)
 
-- [ ] **Step 1: Mở rộng `frontend/src/lib/api.ts`**
+- [x] **Step 1: Mở rộng `frontend/src/lib/api.ts`**
 
 Thêm các phương thức gọi API upload:
 ```typescript
@@ -383,7 +383,7 @@ async uploadToMinIO(uploadUrl: string, file: File): Promise<void> {
 },
 ```
 
-- [ ] **Step 2: Tạo component `frontend/src/components/common/ImageUploader.tsx`**
+- [x] **Step 2: Tạo component `frontend/src/components/common/ImageUploader.tsx`**
 
 ```tsx
 "use client";
@@ -497,14 +497,14 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
 };
 ```
 
-- [ ] **Step 3: Export `ImageUploader` trong `frontend/src/components/common/index.ts`**
+- [x] **Step 3: Export `ImageUploader` trong `frontend/src/components/common/index.ts`**
 
-- [ ] **Step 4: Kiểm tra biên dịch TypeScript**
+- [x] **Step 4: Kiểm tra biên dịch TypeScript**
 
 Chạy: `cd frontend && rtk tsc --noEmit`  
 Kỳ vọng: Không có lỗi.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```bash
 git add frontend/src/lib/api.ts frontend/src/components/common/ImageUploader.tsx frontend/src/components/common/index.ts
@@ -524,22 +524,22 @@ git commit -m "feat(frontend): implement ImageUploader component with direct min
 - Consumes: `ImageUploader`
 - Produces: Form tạo sản phẩm cho phép upload ảnh và POS hiển thị thumbnail ảnh thật khi có.
 
-- [ ] **Step 1: Tích hợp `ImageUploader` vào form `/products/new`**
+- [x] **Step 1: Tích hợp `ImageUploader` vào form `/products/new`**
 
 Thêm trường `imageUrl` vào state form `ProductForm`.
 Khi cấu hình biến thể (Matrix / Standard), cho phép gán `image_url` cho biến thể.
 
-- [ ] **Step 2: Cập nhật `PosProductGrid.tsx` hiển thị ảnh sản phẩm**
+- [x] **Step 2: Cập nhật `PosProductGrid.tsx` hiển thị ảnh sản phẩm**
 
 Trong thẻ sản phẩm (`ProductCard`):
 - Nếu `product.image_url` tồn tại, render thẻ `<img>` với `object-cover`.
 - Nếu không có ảnh, fallback về icon đặc trưng ngành (Scale / Layers / Utensils).
 
-- [ ] **Step 3: Cập nhật `PosMatrixModal.tsx` hiển thị ảnh của biến thể**
+- [x] **Step 3: Cập nhật `PosMatrixModal.tsx` hiển thị ảnh của biến thể**
 
 Khi người dùng chọn thuộc tính (Color/Size), nếu biến thể tương ứng có `image_url`, hiển thị ảnh biến thể trong khung preview.
 
-- [ ] **Step 4: Kiểm tra toàn diện Backend Tests & Next.js Build**
+- [x] **Step 4: Kiểm tra toàn diện Backend Tests & Next.js Build**
 
 Chạy:
 1. `cd backend && /usr/local/go/bin/go test -v ./...`
@@ -547,7 +547,7 @@ Chạy:
 3. `cd frontend && npx next build`
 Kỳ vọng: 100% PASS không có lỗi.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 ```bash
 git add frontend/src/app/products/new/page.tsx frontend/src/components/pos/

@@ -191,13 +191,27 @@ export const PosMatrixModal: React.FC<PosMatrixModalProps> = ({
             {/* Matching Variant Card Preview */}
             {matchingVariant ? (
               <div className="p-3.5 rounded-sm bg-surface-muted/50 border border-border-default space-y-2 mt-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-text-main text-sm">
-                    {matchingVariant.variant_name || matchingVariant.sku}
-                  </span>
-                  <span className="text-[11px] font-mono tabular-nums text-text-sub">
-                    SKU: {matchingVariant.sku}
-                  </span>
+                <div className="flex items-center gap-3">
+                  {(matchingVariant.image_url || product.image_url) && (
+                    <div className="w-12 h-12 rounded-sm overflow-hidden shrink-0 border border-border-subtle bg-surface-card">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={matchingVariant.image_url || product.image_url}
+                        alt={matchingVariant.variant_name || matchingVariant.sku}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-text-main text-sm truncate">
+                        {matchingVariant.variant_name || matchingVariant.sku}
+                      </span>
+                      <span className="text-[11px] font-mono tabular-nums text-text-sub shrink-0 ml-2">
+                        SKU: {matchingVariant.sku}
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between pt-2 border-t border-border-subtle">

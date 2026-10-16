@@ -34,6 +34,7 @@ export interface GeneratedVariant {
   base_selling_price: number;
   min_selling_price: number;
   current_stock: number;
+  image_url?: string;
 }
 
 export function generateVariantsFromAttributes(

@@ -59,6 +59,7 @@ export interface ProductVariant {
   current_stock?: number | string;
   current_inventory?: number | string;
   min_stock_alert?: number | string;
+  image_url?: string;
   uom_conversions?: UomConversion[];
 }
 
@@ -74,6 +75,8 @@ export interface Product {
   track_inventory: boolean;
   track_batches: boolean;
   production_mode: string;
+  image_url?: string;
+  images?: string | string[];
   variants?: ProductVariant[];
 }
 
@@ -87,6 +90,8 @@ export interface CreateProductInput {
   track_inventory?: boolean;
   track_batches?: boolean;
   production_mode?: string;
+  image_url?: string;
+  images?: string | string[];
   cost_price?: number;
   base_selling_price?: number;
   min_selling_price?: number;
@@ -298,6 +303,12 @@ export interface PosCheckoutResponse {
   offline?: boolean;
 }
 
+export interface PresignedUploadResponse {
+  upload_url: string;
+  file_url: string;
+  object_name: string;
+}
+
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
   const headers = {
@@ -461,4 +472,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  // Image Upload & MinIO Storage
+  getPresignedUploadUrl: (filename: string, contentType: string) =>
+    request<PresignedUploadResponse>("/upload/presigned-url", {
+      method: "POST",
+      body: JSON.stringify({ filename, content_type: contentType }),
+    }),
+  uploadToMinIO: async (uploadUrl: string, file: File): Promise<void> => {
+    const res = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": file.type },
+      body: file,
+    });
+    if (!res.ok) {
+      throw new Error("Tải ảnh lên MinIO thất bại");
+    }
+  },
 };

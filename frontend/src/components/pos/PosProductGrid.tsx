@@ -187,13 +187,25 @@ export const PosProductGrid: React.FC<PosProductGridProps> = ({
                     </div>
                   </div>
 
-                  {/* Card Mid: Product Name & UOM */}
-                  <div className="my-1 flex-1">
-                    <div className="font-semibold text-text-main text-xs sm:text-sm line-clamp-2 leading-snug group-hover:text-brand transition-colors">
-                      {product.name}
-                    </div>
-                    <div className="text-[10px] text-text-sub mt-0.5">
-                      ĐVT: <span className="font-medium text-text-main">{product.base_uom}</span>
+                  {/* Card Mid: Product Name, Thumbnail & UOM */}
+                  <div className="my-1 flex-1 flex items-start gap-2 min-w-0">
+                    {(product.image_url || primaryVariant?.image_url) && (
+                      <div className="w-10 h-10 rounded-sm overflow-hidden shrink-0 border border-border-subtle bg-surface-muted mt-0.5">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={product.image_url || primaryVariant?.image_url}
+                          alt={product.name}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-text-main text-xs sm:text-sm line-clamp-2 leading-snug group-hover:text-brand transition-colors">
+                        {product.name}
+                      </div>
+                      <div className="text-[10px] text-text-sub mt-0.5">
+                        ĐVT: <span className="font-medium text-text-main">{product.base_uom}</span>
+                      </div>
                     </div>
                   </div>
 

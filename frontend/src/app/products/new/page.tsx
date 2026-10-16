@@ -12,6 +12,7 @@ import {
   AttributeInput,
   GeneratedVariant,
 } from "@/lib/matrix-utils";
+import { ImageUploader } from "@/components/common";
 import {
   ArrowLeft,
   Package,
@@ -101,6 +102,7 @@ export default function NewProductPage() {
   const [baseUom, setBaseUom] = useState("cái");
   const [customUom, setCustomUom] = useState("");
   const [productType, setProductType] = useState("FINISHED_GOOD");
+  const [imageUrl, setImageUrl] = useState("");
 
   // Single-product pricing & inventory (when matrix is off)
   const [costPrice, setCostPrice] = useState<number>(0);
@@ -306,6 +308,7 @@ export default function NewProductPage() {
         category_id: resolvedCategoryId,
         product_type: productType,
         base_uom: finalBaseUom,
+        image_url: imageUrl.trim() || undefined,
         is_weighable: isModuleEnabled("catch_weight") ? isWeighable : false,
         production_mode: isModuleEnabled("bom_production") ? productionMode : "NONE",
         track_inventory: true,
@@ -322,6 +325,7 @@ export default function NewProductPage() {
           base_selling_price: Number(gv.base_selling_price || 0),
           min_selling_price: Number(gv.min_selling_price || 0),
           current_stock: Number(gv.current_stock || 0),
+          image_url: gv.image_url || imageUrl.trim() || undefined,
         }));
       } else {
         // Single variant product
@@ -338,6 +342,7 @@ export default function NewProductPage() {
             base_selling_price: Number(baseSellingPrice || 0),
             min_selling_price: Number(minSellingPrice || 0),
             current_stock: Number(initialStock || 0),
+            image_url: imageUrl.trim() || undefined,
           },
         ];
       }
@@ -555,6 +560,16 @@ export default function NewProductPage() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Product Image Upload */}
+            <div className="md:col-span-2 pt-2 border-t border-border-subtle">
+              <ImageUploader
+                value={imageUrl}
+                onChange={setImageUrl}
+                onRemove={() => setImageUrl("")}
+                label="Ảnh sản phẩm (MinIO Object Storage)"
+              />
             </div>
           </div>
 
