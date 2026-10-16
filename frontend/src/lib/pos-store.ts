@@ -104,15 +104,13 @@ export function calculateLineTotal(
   actualBaseQty: number,
   modifiers: PosModifier[] = [],
   isReturn: boolean = false,
-  isWeighable: boolean = false
+  isWeighable: boolean = false,
+  isVariableRatio: boolean = false
 ): number {
   const modTotalPerUnit = modifiers.reduce((acc, m) => acc + (Number(m.price) || 0), 0);
   let baseAmount: number;
 
-  // ponytail: catch-weight prices by weighed kg if weighable, else by piece/soldQty.
-  if (isWeighable && actualBaseQty > 0) {
-    baseAmount = actualUnitPrice * actualBaseQty + modTotalPerUnit * soldQty;
-  } else if (actualBaseQty > 0 && actualBaseQty !== soldQty) {
+  if ((isWeighable || isVariableRatio) && actualBaseQty > 0) {
     baseAmount = actualUnitPrice * actualBaseQty + modTotalPerUnit * soldQty;
   } else {
     baseAmount = (actualUnitPrice + modTotalPerUnit) * soldQty;
@@ -178,13 +176,17 @@ export const usePosStore = create<PosState>()(
           actualBaseQty = isWeighable ? soldQty : soldQty * conversionFactor;
         }
 
-        const isBelowMin = !isReturn && minSellingPrice > 0 && actualUnitPrice < minSellingPrice;
+        const effectiveMinPrice = isVariableRatio
+          ? minSellingPrice
+          : minSellingPrice * (conversionFactor > 0 ? conversionFactor : 1);
+        const isBelowMin = !isReturn && minSellingPrice > 0 && actualUnitPrice < effectiveMinPrice;
         const isPriceOverridden = actualUnitPrice !== originalUnitPrice;
 
         set(state => {
-          // Merge identical standard rows if not weighable, not return, and no modifiers
+          // Merge identical standard rows if not weighable, not variable ratio, not return, and no modifiers
           const canMerge =
             !isWeighable &&
+            !isVariableRatio &&
             !isReturn &&
             modifiers.length === 0 &&
             !isPriceOverridden;
@@ -211,7 +213,8 @@ export const usePosStore = create<PosState>()(
               nextBaseQty,
               existing.modifiers,
               existing.isReturn,
-              existing.isWeighable
+              existing.isWeighable,
+              existing.isVariableRatio
             );
 
             nextCart[existingIndex] = {
@@ -247,7 +250,8 @@ export const usePosStore = create<PosState>()(
               actualBaseQty,
               modifiers,
               isReturn,
-              isWeighable
+              isWeighable,
+              isVariableRatio
             ),
             isPriceOverridden,
             isBelowMinPrice: isBelowMin,
@@ -282,7 +286,8 @@ export const usePosStore = create<PosState>()(
               resolvedBaseQty,
               item.modifiers,
               item.isReturn,
-              item.isWeighable
+              item.isWeighable,
+              item.isVariableRatio
             );
 
             return {
@@ -302,8 +307,11 @@ export const usePosStore = create<PosState>()(
           cart: state.cart.map(item => {
             if (item.id !== id) return item;
 
-            const minPrice = item.minSellingPrice || 0;
-            if (!item.isReturn && minPrice > 0 && newUnitPrice < minPrice) {
+            const minSellingPrice = item.minSellingPrice || 0;
+            const effectiveMinPrice = item.isVariableRatio
+              ? minSellingPrice
+              : minSellingPrice * (item.conversionFactor > 0 ? item.conversionFactor : 1);
+            if (!item.isReturn && minSellingPrice > 0 && newUnitPrice < effectiveMinPrice) {
               isBelowMin = true;
             }
 
@@ -315,7 +323,8 @@ export const usePosStore = create<PosState>()(
               item.actualBaseQty,
               item.modifiers,
               item.isReturn,
-              item.isWeighable
+              item.isWeighable,
+              item.isVariableRatio
             );
 
             return {
@@ -337,14 +346,19 @@ export const usePosStore = create<PosState>()(
             if (item.id !== id) return item;
 
             const nextReturn = !item.isReturn;
-            const isBelowMin = !nextReturn && item.minSellingPrice > 0 && item.actualUnitPrice < item.minSellingPrice;
+            const minSellingPrice = item.minSellingPrice || 0;
+            const effectiveMinPrice = item.isVariableRatio
+              ? minSellingPrice
+              : minSellingPrice * (item.conversionFactor > 0 ? item.conversionFactor : 1);
+            const isBelowMin = !nextReturn && minSellingPrice > 0 && item.actualUnitPrice < effectiveMinPrice;
             const lineTotal = calculateLineTotal(
               item.actualUnitPrice,
               item.soldQty,
               item.actualBaseQty,
               item.modifiers,
               nextReturn,
-              item.isWeighable
+              item.isWeighable,
+              item.isVariableRatio
             );
 
             return {
@@ -569,6 +583,8 @@ export function _selfCheckPosStore(): boolean {
     calculateLineTotal(100000, 2, 2) === 200000 &&
     calculateLineTotal(100000, 2, 2, [], true) === -200000 &&
     calculateLineTotal(160000, 1, 1.35, [], false, true) === 216000 &&
-    calculateLineTotal(25000, 2, 2, [{ name: "Trứng", price: 5000 }], false) === 60000
+    calculateLineTotal(25000, 2, 2, [{ name: "Trứng", price: 5000 }], false) === 60000 &&
+    calculateLineTotal(240000, 1, 24, [], false, false, false) === 240000 &&
+    calculateLineTotal(100000, 2, 2.5, [], false, false, true) === 250000
   );
 }
