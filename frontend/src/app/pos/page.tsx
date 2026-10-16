@@ -121,6 +121,7 @@ export default function PosPage() {
   const [weighUnitPrice, setWeighUnitPrice] = useState<number>(0);
 
   const [activeMatrixModal, setActiveMatrixModal] = useState<Product | null>(null);
+  const [selectedAttributes, setSelectedAttributes] = useState<Record<string, string>>({});
 
   const [activeModifierModal, setActiveModifierModal] = useState<{
     product: Product;
@@ -228,7 +229,18 @@ export default function PosPage() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  });
+  }, [
+    cart,
+    isCheckingOut,
+    activeWeighModal,
+    activeMatrixModal,
+    activeModifierModal,
+    isCustomerModalOpen,
+    activePriceModal,
+    checkoutSuccess,
+    toggleItemReturn,
+    handleTriggerCheckout,
+  ]);
 
   // Filtered Products
   const filteredProducts = useMemo(() => {
@@ -295,12 +307,15 @@ export default function PosPage() {
     const primaryVariant = product.variants?.[0];
     if (!primaryVariant) return;
 
-    if (isWeighableProduct(product)) {
+    if (isMatrixProduct(product)) {
+      // Initialize selected attributes with first variant's attributes
+      const firstAttrs = parseAttributes(primaryVariant.attributes);
+      setSelectedAttributes(firstAttrs);
+      setActiveMatrixModal(product);
+    } else if (isWeighableProduct(product)) {
       setWeighInput("1.000");
       setWeighUnitPrice(Number(primaryVariant.base_selling_price) || 0);
       setActiveWeighModal({ product, variant: primaryVariant });
-    } else if (isMatrixProduct(product)) {
-      setActiveMatrixModal(product);
     } else if (isModifierProduct(product)) {
       setSelectedModifiers([]);
       setActiveModifierModal({ product, variant: primaryVariant });
@@ -322,13 +337,30 @@ export default function PosPage() {
       for (const v of p.variants) {
         if (
           v.sku.toLowerCase() === query ||
-          (v.barcode && v.barcode.toLowerCase() === query) ||
-          p.code.toLowerCase() === query
+          (v.barcode && v.barcode.toLowerCase() === query)
         ) {
-          handleProductCardClick(p);
+          if (isWeighableProduct(p)) {
+            setWeighInput("1.000");
+            setWeighUnitPrice(Number(v.base_selling_price) || 0);
+            setActiveWeighModal({ product: p, variant: v });
+          } else if (isModifierProduct(p)) {
+            setSelectedModifiers([]);
+            setActiveModifierModal({ product: p, variant: v });
+          } else {
+            addItem(v, p);
+          }
           setSearchQuery("");
           return;
         }
+      }
+    }
+
+    // Check product code match
+    for (const p of products) {
+      if (p.code.toLowerCase() === query) {
+        handleProductCardClick(p);
+        setSearchQuery("");
+        return;
       }
     }
 
@@ -403,7 +435,7 @@ export default function PosPage() {
   };
 
   // Checkout Execution
-  const handleTriggerCheckout = async () => {
+  async function handleTriggerCheckout() {
     if (cart.length === 0) return;
     setCheckoutError(null);
 
@@ -1262,71 +1294,149 @@ export default function PosPage() {
             </div>
 
             {/* Modal Content */}
-            <div className="p-5 flex-1 overflow-y-auto space-y-3">
+            <div className="p-5 flex-1 overflow-y-auto space-y-4">
               <div>
                 <h4 className="font-bold text-text-main text-base">
                   {activeMatrixModal.name}
                 </h4>
-                <p className="text-xs text-text-sub">
-                  Chạm vào phiên bản Màu sắc x Kích cỡ bạn muốn bán:
+                <p className="text-xs text-text-sub mt-0.5">
+                  Chọn các thuộc tính bên dưới để xem phiên bản và giá bán tương ứng:
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {activeMatrixModal.variants?.map((v) => {
+              {(() => {
+                const variants = activeMatrixModal.variants || [];
+
+                // Extract all unique attribute keys across variants
+                const attributeKeys: string[] = [];
+                variants.forEach((v) => {
                   const attrs = parseAttributes(v.attributes);
-                  const attrLabels = Object.entries(attrs).map(
-                    ([k, val]) => `${k}: ${val}`
-                  );
-                  const stock = getVariantStock(v);
+                  Object.keys(attrs).forEach((key) => {
+                    if (!attributeKeys.includes(key)) {
+                      attributeKeys.push(key);
+                    }
+                  });
+                });
 
-                  return (
-                    <button
-                      key={v.id}
-                      type="button"
-                      onClick={() => {
-                        if (isWeighableProduct(activeMatrixModal)) {
-                          setActiveMatrixModal(null);
-                          setWeighInput("1.000");
-                          setWeighUnitPrice(Number(v.base_selling_price) || 0);
-                          setActiveWeighModal({ product: activeMatrixModal, variant: v });
-                        } else if (isModifierProduct(activeMatrixModal)) {
-                          setActiveMatrixModal(null);
-                          setSelectedModifiers([]);
-                          setActiveModifierModal({ product: activeMatrixModal, variant: v });
-                        } else {
-                          addItem(v, activeMatrixModal);
-                          setActiveMatrixModal(null);
-                        }
-                      }}
-                      className="p-3 rounded-xl border border-border-default hover:border-purple-600 hover:bg-purple-50/40 text-left transition-all active:scale-[0.98] flex flex-col justify-between"
-                    >
-                      <div>
-                        <div className="font-bold text-text-main text-sm">
-                          {v.variant_name || v.sku}
-                        </div>
-                        {attrLabels.length > 0 && (
-                          <div className="text-xs text-purple-700 font-medium mt-0.5">
-                            {attrLabels.join(" • ")}
+                // Find matching variant based on current selected attributes
+                const matchingVariant = variants.find((v) => {
+                  const attrs = parseAttributes(v.attributes);
+                  return attributeKeys.every((key) => {
+                    if (!selectedAttributes[key]) return true;
+                    return attrs[key] === selectedAttributes[key];
+                  });
+                }) || variants[0];
+
+                const stock = matchingVariant ? getVariantStock(matchingVariant) : 0;
+
+                return (
+                  <div className="space-y-4">
+                    {/* Attribute Rows */}
+                    {attributeKeys.map((attrKey) => {
+                      // Get all unique values for this attribute key
+                      const valuesSet = new Set<string>();
+                      variants.forEach((v) => {
+                        const attrs = parseAttributes(v.attributes);
+                        if (attrs[attrKey]) valuesSet.add(attrs[attrKey]);
+                      });
+                      const values = Array.from(valuesSet);
+                      const currentSelectedVal = selectedAttributes[attrKey] || values[0];
+
+                      return (
+                        <div key={attrKey} className="space-y-1.5">
+                          <label className="text-xs font-bold text-text-sub uppercase tracking-wider">
+                            {attrKey}:
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            {values.map((val) => {
+                              const isSelected = currentSelectedVal === val;
+                              return (
+                                <button
+                                  key={val}
+                                  type="button"
+                                  onClick={() =>
+                                    setSelectedAttributes((prev) => ({
+                                      ...prev,
+                                      [attrKey]: val,
+                                    }))
+                                  }
+                                  className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-all ${
+                                    isSelected
+                                      ? "bg-brand text-white border-brand shadow-sm"
+                                      : "bg-surface-app text-text-main border-border-default hover:bg-surface-muted"
+                                  }`}
+                                >
+                                  {val}
+                                </button>
+                              );
+                            })}
                           </div>
-                        )}
-                        <div className="text-[11px] font-mono text-text-sub mt-0.5">
-                          SKU: {v.sku}
+                        </div>
+                      );
+                    })}
+
+                    {/* Matching Variant Details Card */}
+                    {matchingVariant ? (
+                      <div className="p-4 rounded-xl bg-surface-muted/60 border border-border-subtle space-y-2 mt-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-text-main text-sm">
+                            {matchingVariant.variant_name || matchingVariant.sku}
+                          </span>
+                          <span className="text-[11px] font-mono text-text-sub">
+                            SKU: {matchingVariant.sku}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between pt-2 border-t border-border-subtle">
+                          <div>
+                            <div className="text-[11px] text-text-sub">Đơn giá bán:</div>
+                            <div className="text-base font-extrabold text-brand font-mono">
+                              {formatVND(matchingVariant.base_selling_price)}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[11px] text-text-sub">Tồn kho hiện tại:</div>
+                            <div className="text-sm font-bold text-text-main font-mono">
+                              {formatQty(stock, activeMatrixModal.base_uom)}
+                            </div>
+                          </div>
                         </div>
                       </div>
-
-                      <div className="mt-2 pt-2 border-t border-border-subtle flex justify-between items-center text-xs">
-                        <span className="font-bold text-brand">
-                          {formatVND(v.base_selling_price)}
-                        </span>
-                        <span className="text-text-sub">
-                          Tồn: {formatQty(stock, activeMatrixModal.base_uom)}
-                        </span>
+                    ) : (
+                      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                        Không tìm thấy biến thể phù hợp với tổ hợp thuộc tính đã chọn.
                       </div>
-                    </button>
-                  );
-                })}
-              </div>
+                    )}
+
+                    {/* Quick Add To Cart Button */}
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        disabled={!matchingVariant}
+                        onClick={() => {
+                          if (!matchingVariant) return;
+                          if (isWeighableProduct(activeMatrixModal)) {
+                            setActiveMatrixModal(null);
+                            setWeighInput("1.000");
+                            setWeighUnitPrice(Number(matchingVariant.base_selling_price) || 0);
+                            setActiveWeighModal({ product: activeMatrixModal, variant: matchingVariant });
+                          } else if (isModifierProduct(activeMatrixModal)) {
+                            setActiveMatrixModal(null);
+                            setSelectedModifiers([]);
+                            setActiveModifierModal({ product: activeMatrixModal, variant: matchingVariant });
+                          } else {
+                            addItem(matchingVariant, activeMatrixModal);
+                            setActiveMatrixModal(null);
+                          }
+                        }}
+                        className="w-full py-2.5 rounded-lg bg-brand hover:bg-brand-hover text-white text-sm font-bold shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>Thêm biến thể vào giỏ hàng</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Modal Footer */}
