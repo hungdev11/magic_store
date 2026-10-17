@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/shopspring/decimal"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	"magic_store/backend/internal/model"
@@ -431,5 +431,91 @@ func TestBOMProductionService_RecordWastage(t *testing.T) {
 	err = db.First(&dbCashTx, "id = ?", cashTx.ID).Error
 	if err != nil {
 		t.Fatalf("expected cashbook tx persisted in DB, got: %v", err)
+	}
+}
+
+func TestBOMProductionService_CostCalculationAndSync(t *testing.T) {
+	db := setupBOMTestDB(t)
+	ledgerSvc := service.NewInventoryLedgerService(db)
+	bomSvc := service.NewBOMProductionService(db, ledgerSvc)
+	ctx := context.Background()
+
+	cat := &model.Category{ID: "cat_beverage", Name: "Đồ uống", Code: "BEVERAGE"}
+	db.Create(cat)
+
+	// Raw 1: Cà phê hạt (4,000đ for 20g) -> 200đ/g
+	prodCoffee := &model.Product{ID: "p_coffee_raw", Name: "Hạt cà phê Robusta", Code: "RAW_COFFEE", CategoryID: cat.ID, ProductType: model.ProductTypeRawMaterial, BaseUom: "g"}
+	db.Create(prodCoffee)
+	varCoffee := &model.ProductVariant{ID: "v_coffee_raw", ProductID: prodCoffee.ID, Sku: "SKU-COFFEE-RAW", VariantName: "Hạt cà phê", CostPrice: decimal.NewFromInt(200)}
+	db.Create(varCoffee)
+
+	// Raw 2: Sữa đặc (1,800đ for 30g) -> 60đ/g
+	prodMilk := &model.Product{ID: "p_milk_raw", Name: "Sữa đặc Phương Nam", Code: "RAW_MILK", CategoryID: cat.ID, ProductType: model.ProductTypeRawMaterial, BaseUom: "g"}
+	db.Create(prodMilk)
+	varMilk := &model.ProductVariant{ID: "v_milk_raw", ProductID: prodMilk.ID, Sku: "SKU-MILK-RAW", VariantName: "Sữa đặc", CostPrice: decimal.NewFromInt(60)}
+	db.Create(varMilk)
+
+	// Raw 3: Ly nhựa (1,000đ for 1 cái)
+	prodCup := &model.Product{ID: "p_cup_raw", Name: "Ly nhựa mang đi", Code: "RAW_CUP", CategoryID: cat.ID, ProductType: model.ProductTypeRawMaterial, BaseUom: "cái"}
+	db.Create(prodCup)
+	varCup := &model.ProductVariant{ID: "v_cup_raw", ProductID: prodCup.ID, Sku: "SKU-CUP-RAW", VariantName: "Ly nhựa", CostPrice: decimal.NewFromInt(1000)}
+	db.Create(varCup)
+
+	// Finished Good: Cà phê sữa đá (initial CostPrice = 0)
+	prodCafe := &model.Product{ID: "p_cafe_sua", Name: "Cà phê sữa đá", Code: "FG_CAFE_SUA", CategoryID: cat.ID, ProductType: model.ProductTypeFinishedGood, BaseUom: "ly", ProductionMode: model.ProductionModePosBackflush}
+	db.Create(prodCafe)
+	varCafe := &model.ProductVariant{ID: "v_cafe_sua", ProductID: prodCafe.ID, Sku: "SKU-CAFE-SUA", VariantName: "Cà phê sữa đá Ly Lớn", CostPrice: decimal.Zero}
+	db.Create(varCafe)
+
+	// Recipe: 20g cà phê + 30g sữa + 1 ly = 4,000 + 1,800 + 1,000 = 6,800đ
+	recipe := &model.BomRecipe{
+		ID:              "recipe_cafe_sua",
+		TargetVariantID: varCafe.ID,
+		RecipeType:      model.RecipeTypeAssembly,
+		OutputQty:       decimal.NewFromInt(1),
+		Items: []model.BomItem{
+			{RecipeID: "recipe_cafe_sua", ComponentVariantID: varCoffee.ID, QtyRequired: decimal.NewFromInt(20)},
+			{RecipeID: "recipe_cafe_sua", ComponentVariantID: varMilk.ID, QtyRequired: decimal.NewFromInt(30)},
+			{RecipeID: "recipe_cafe_sua", ComponentVariantID: varCup.ID, QtyRequired: decimal.NewFromInt(1)},
+		},
+	}
+	db.Create(recipe)
+
+	// 1. Verify CalculateRecipeCost returns 6,800
+	cost, err := bomSvc.CalculateRecipeCost(ctx, nil, recipe.ID)
+	if err != nil {
+		t.Fatalf("CalculateRecipeCost failed: %v", err)
+	}
+	expectedCost := decimal.NewFromInt(6800)
+	if !cost.Equal(expectedCost) {
+		t.Errorf("expected recipe cost %v, got %v", expectedCost, cost)
+	}
+
+	// 2. Verify SyncVariantCostFromBOM updates variant.CostPrice
+	syncedCost, err := bomSvc.SyncVariantCostFromBOM(ctx, nil, varCafe.ID)
+	if err != nil {
+		t.Fatalf("SyncVariantCostFromBOM failed: %v", err)
+	}
+	if !syncedCost.Equal(expectedCost) {
+		t.Errorf("expected synced cost %v, got %v", expectedCost, syncedCost)
+	}
+
+	var updatedVar model.ProductVariant
+	db.First(&updatedVar, "id = ?", varCafe.ID)
+	if !updatedVar.CostPrice.Equal(expectedCost) {
+		t.Errorf("expected variant cost_price in DB %v, got %v", expectedCost, updatedVar.CostPrice)
+	}
+
+	// 3. Verify SyncBOMCostsForComponent when milk price changes from 60 to 80 (diff = +600)
+	// New total cost = 4,000 + 30*80 + 1,000 = 7,400đ
+	db.Model(&model.ProductVariant{}).Where("id = ?", varMilk.ID).Update("cost_price", decimal.NewFromInt(80))
+	if err := bomSvc.SyncBOMCostsForComponent(ctx, nil, varMilk.ID); err != nil {
+		t.Fatalf("SyncBOMCostsForComponent failed: %v", err)
+	}
+
+	db.First(&updatedVar, "id = ?", varCafe.ID)
+	expectedNewCost := decimal.NewFromInt(7400)
+	if !updatedVar.CostPrice.Equal(expectedNewCost) {
+		t.Errorf("expected updated variant cost_price %v, got %v", expectedNewCost, updatedVar.CostPrice)
 	}
 }

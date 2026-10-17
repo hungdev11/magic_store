@@ -6,4 +6,6 @@ dist/
 .next/
 *.tsbuildinfo
 *.exe
+*.db
+backend/uploads/
 .claude/

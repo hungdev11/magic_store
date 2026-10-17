@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	"magic_store/backend/internal/api"
@@ -36,6 +36,11 @@ func main() {
 
 	if err := db.AutoMigrate(
 		&model.StoreSetting{},
+		&model.Warehouse{},
+		&model.WarehouseStock{},
+		&model.WarehouseStockBalance{},
+		&model.StockTransfer{},
+		&model.StockTransferItem{},
 		&model.Unit{},
 		&model.Category{},
 		&model.Product{},
@@ -57,6 +62,21 @@ func main() {
 		&model.CashbookTransaction{},
 	); err != nil {
 		log.Fatalf("failed to auto-migrate database: %v", err)
+	}
+
+	// Ensure default warehouse exists
+	var whCount int64
+	db.Model(&model.Warehouse{}).Count(&whCount)
+	if whCount == 0 {
+		defaultWH := model.Warehouse{
+			Code:      "KHO_TONG",
+			Name:      "Kho Tổng (Mặc định)",
+			Type:      model.WarehouseTypeStorage,
+			Address:   "Trụ sở chính",
+			IsActive:  true,
+			IsDefault: true,
+		}
+		_ = db.Create(&defaultWH).Error
 	}
 
 	uomSvc := service.NewUOMService(db)

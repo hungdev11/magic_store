@@ -98,6 +98,93 @@ export function formatPercent(rate: number | string | null | undefined): string 
   return `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 }).format(num)}%`;
 }
 
+export interface MultiUomStockResult {
+  baseTotal: string;
+  breakdown: string;
+  fullText: string;
+  parts: { name: string; qty: number }[];
+}
+
+// formatMultiUomStock decomposes atomic base quantities into human-readable pack hierarchy (e.g. 53 Lon -> 2 Thùng, 5 Lon lẻ)
+export function formatMultiUomStock(
+  baseQty: number | string | null | undefined,
+  baseUom: string,
+  conversions?: { uom_name: string; conversion_factor: number | string }[]
+): MultiUomStockResult {
+  const qty = typeof baseQty === "string" ? parseFloat(baseQty) : baseQty ?? 0;
+  if (!qty || isNaN(qty) || qty <= 0) {
+    const zeroStr = `0 ${baseUom}`.trim();
+    return {
+      baseTotal: zeroStr,
+      breakdown: zeroStr,
+      fullText: zeroStr,
+      parts: [],
+    };
+  }
+
+  const baseTotal = formatQty(qty, baseUom);
+
+  if (!conversions || conversions.length === 0) {
+    return {
+      baseTotal,
+      breakdown: baseTotal,
+      fullText: baseTotal,
+      parts: [{ name: baseUom, qty }],
+    };
+  }
+
+  // Sort conversions descending by factor (>1)
+  const sortedConversions = [...conversions]
+    .map((c) => ({
+      name: c.uom_name,
+      factor: Number(c.conversion_factor) || 0,
+    }))
+    .filter((c) => c.factor > 1)
+    .sort((a, b) => b.factor - a.factor);
+
+  if (sortedConversions.length === 0) {
+    return {
+      baseTotal,
+      breakdown: baseTotal,
+      fullText: baseTotal,
+      parts: [{ name: baseUom, qty }],
+    };
+  }
+
+  let remaining = qty;
+  const parts: { name: string; qty: number }[] = [];
+
+  for (const conv of sortedConversions) {
+    if (remaining >= conv.factor) {
+      const count = Math.floor(remaining / conv.factor);
+      if (count > 0) {
+        parts.push({ name: conv.name, qty: count });
+        remaining = remaining - count * conv.factor;
+      }
+    }
+  }
+
+  if (remaining > 0 || parts.length === 0) {
+    parts.push({
+      name: `${baseUom}${parts.length > 0 ? " lẻ" : ""}`,
+      qty: Math.round(remaining * 1000) / 1000,
+    });
+  }
+
+  const breakdown = parts
+    .map((p) => `${Number.isInteger(p.qty) ? p.qty : p.qty.toFixed(2)} ${p.name}`)
+    .join(", ");
+
+  const fullText = parts.length > 1 ? `${breakdown} (${baseTotal})` : breakdown;
+
+  return {
+    baseTotal,
+    breakdown,
+    fullText,
+    parts,
+  };
+}
+
 export interface ModuleMeta {
   key: string;
   label: string;

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/shopspring/decimal"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	"magic_store/backend/internal/model"

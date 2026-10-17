@@ -13,6 +13,7 @@ import {
   type ProductVariant,
   type Category,
   type Partner,
+  type VariantStockReport,
 } from "@/lib/api";
 import {
   isWeighableProduct,
@@ -59,6 +60,7 @@ export default function PosPage() {
     toggleItemReturn,
     removeItem,
     clearCart,
+    setCart,
     setCustomer,
     setDiscount,
     setSurcharge,
@@ -77,15 +79,51 @@ export default function PosPage() {
     { id: "default", name: "Kho chính (Mặc định)" },
   ]);
   const [activeWarehouseId, setActiveWarehouseId] = useState<string>("default");
-  const [activeShift] = useState<string>("Ca 1 (Sáng)");
+  const [warehouseReports, setWarehouseReports] = useState<VariantStockReport[]>([]);
+  const [activeShift, setActiveShift] = useState<string>("Ca 1 (Sáng)");
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [stockWarning, setStockWarning] = useState<string | null>(null);
+
+  // Computed Warehouse Stock Map for Selected Branch Warehouse
+  const warehouseStockMap = useMemo(() => {
+    if (!activeWarehouseId || warehouseReports.length === 0) return undefined;
+    const map = new Map<string, number>();
+    for (const report of warehouseReports) {
+      const whStock = report.by_warehouse?.find((w) => w.warehouse_id === activeWarehouseId);
+      map.set(report.variant_id, whStock ? Number(whStock.stock) || 0 : 0);
+    }
+    return map;
+  }, [warehouseReports, activeWarehouseId]);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("ALL");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Multi-order Tabs State
+  // Multi-order Tabs State (Hỗ trợ lưu tạm và chuyển đổi nhiều đơn hàng)
+  interface DraftOrder {
+    id: string;
+    title: string;
+    cart: PosCartItem[];
+    selectedCustomer: Partner | null;
+    discountAmount: number;
+    surchargeAmount: number;
+    paidAmount: number;
+    paymentMethod: "CASH" | "BANK_QR" | "MIXED" | "CREDIT";
+  }
+
+  const [draftOrders, setDraftOrders] = useState<DraftOrder[]>([
+    {
+      id: "order-1",
+      title: "Đơn 1",
+      cart: [],
+      selectedCustomer: null,
+      discountAmount: 0,
+      surchargeAmount: 0,
+      paidAmount: 0,
+      paymentMethod: "CASH",
+    },
+  ]);
   const [activeOrderId, setActiveOrderId] = useState<string>("order-1");
 
   // Modal States
@@ -128,14 +166,22 @@ export default function PosPage() {
     async function loadMasterData() {
       setIsLoadingData(true);
       try {
-        const [prodsData, catsData, custsData] = await Promise.all([
+        const [prodsData, catsData, custsData, whData, whStockData] = await Promise.all([
           api.getProducts().catch(() => []),
           api.getCategories().catch(() => []),
           api.getPartners("CUSTOMER").catch(() => []),
+          api.getWarehouses(true).catch(() => []),
+          api.getWarehouseStock().catch(() => []),
         ]);
         setProducts(prodsData || []);
         setCategories(catsData || []);
         setCustomers(custsData || []);
+        setWarehouseReports(whStockData || []);
+        if (whData && whData.length > 0) {
+          setWarehouses(whData.map((w) => ({ id: w.id, name: w.name })));
+          const defaultWh = whData.find((w) => w.is_default);
+          setActiveWarehouseId(defaultWh ? defaultWh.id : whData[0].id);
+        }
       } catch (err) {
         console.error("Failed to load POS master data", err);
       } finally {
@@ -171,6 +217,14 @@ export default function PosPage() {
     const primaryVariant = product.variants?.[0];
     if (!primaryVariant) return;
 
+    if (warehouseStockMap) {
+      const branchStock = warehouseStockMap.get(primaryVariant.id) ?? 0;
+      if (branchStock <= 0) {
+        setStockWarning(`Cảnh báo: Mặt hàng "${product.name}" hiện đã hết hàng trong chi nhánh này (Tồn: 0).`);
+        setTimeout(() => setStockWarning(null), 4000);
+      }
+    }
+
     if (isMatrixProduct(product)) {
       setActiveMatrixModal(product);
     } else if (isWeighableProduct(product)) {
@@ -180,7 +234,7 @@ export default function PosPage() {
     } else {
       addItem(primaryVariant, product);
     }
-  }, [addItem]);
+  }, [addItem, warehouseStockMap]);
 
   const handleTriggerCheckout = useCallback(async () => {
     if (cart.length === 0 || isCheckingOut) return;
@@ -202,7 +256,7 @@ export default function PosPage() {
 
     setIsCheckingOut(true);
     try {
-      const res = await checkout("Đơn bán hàng POS");
+      const res = await checkout("Đơn bán hàng POS", activeWarehouseId);
       setCheckoutSuccess({
         orderId: res.order_number || res.id || "POS-OFFLINE",
         totalAmount: snapshotTotalAmount,
@@ -226,6 +280,7 @@ export default function PosPage() {
     getTotalAmount,
     paymentMethod,
     getChangeAmount,
+    activeWarehouseId,
   ]);
 
   const handleSyncOfflineQueue = useCallback(async () => {
@@ -416,15 +471,91 @@ export default function PosPage() {
     handleTriggerCheckout,
   ]);
 
-  const orderTabs = useMemo(() => [
-    {
-      id: "order-1",
-      title: "Đơn 1",
-      itemCount: cart.length,
-      totalAmount: getTotalAmount(),
-      customerName: selectedCustomer?.name,
-    },
-  ], [cart.length, getTotalAmount, selectedCustomer?.name]);
+  // Synchronize active draft order with current zustand store
+  useEffect(() => {
+    setDraftOrders((prev) =>
+      prev.map((d) =>
+        d.id === activeOrderId
+          ? {
+              ...d,
+              cart,
+              selectedCustomer,
+              discountAmount,
+              surchargeAmount,
+              paidAmount,
+              paymentMethod,
+            }
+          : d
+      )
+    );
+  }, [activeOrderId, cart, selectedCustomer, discountAmount, surchargeAmount, paidAmount, paymentMethod]);
+
+  const handleSelectOrderTab = (targetId: string) => {
+    if (targetId === activeOrderId) return;
+    const target = draftOrders.find((d) => d.id === targetId);
+    if (!target) return;
+
+    setActiveOrderId(targetId);
+    setCart(target.cart);
+    setCustomer(target.selectedCustomer);
+    setDiscount(target.discountAmount);
+    setSurcharge(target.surchargeAmount);
+    setPaidAmount(target.paidAmount);
+    setPaymentMethod(target.paymentMethod);
+  };
+
+  const handleAddOrderTab = () => {
+    const nextIdx = draftOrders.length + 1;
+    const newId = `order-${Date.now()}`;
+    const newDraft: DraftOrder = {
+      id: newId,
+      title: `Đơn ${nextIdx}`,
+      cart: [],
+      selectedCustomer: null,
+      discountAmount: 0,
+      surchargeAmount: 0,
+      paidAmount: 0,
+      paymentMethod: "CASH",
+    };
+
+    setDraftOrders((prev) => [...prev, newDraft]);
+    setActiveOrderId(newId);
+    clearCart();
+  };
+
+  const handleCloseOrderTab = (closeId: string) => {
+    if (draftOrders.length <= 1) return;
+    const nextList = draftOrders.filter((d) => d.id !== closeId);
+    setDraftOrders(nextList);
+
+    if (activeOrderId === closeId) {
+      const nextActive = nextList[0];
+      setActiveOrderId(nextActive.id);
+      setCart(nextActive.cart);
+      setCustomer(nextActive.selectedCustomer);
+      setDiscount(nextActive.discountAmount);
+      setSurcharge(nextActive.surchargeAmount);
+      setPaidAmount(nextActive.paidAmount);
+      setPaymentMethod(nextActive.paymentMethod);
+    }
+  };
+
+  const orderTabs = useMemo(() => {
+    return draftOrders.map((d) => {
+      const isCurrent = d.id === activeOrderId;
+      const tabCart = isCurrent ? cart : d.cart;
+      const tabTotal = isCurrent
+        ? getTotalAmount()
+        : Math.max(0, tabCart.reduce((sum, it) => sum + it.lineTotal, 0) - d.discountAmount + d.surchargeAmount);
+      return {
+        id: d.id,
+        title: d.title,
+        itemCount: tabCart.length,
+        totalAmount: tabTotal,
+        customerName: isCurrent ? selectedCustomer?.name : d.selectedCustomer?.name,
+      };
+    });
+  }, [draftOrders, activeOrderId, cart, getTotalAmount, selectedCustomer?.name]);
 
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-surface-app select-none">
@@ -435,6 +566,7 @@ export default function PosPage() {
         activeWarehouseId={activeWarehouseId}
         onSelectWarehouse={setActiveWarehouseId}
         shiftName={activeShift}
+        onSelectShift={setActiveShift}
         cashierName="Thu ngân"
         isOnline={isOnline}
         offlineCount={offlineQueue.length}
@@ -450,9 +582,9 @@ export default function PosPage() {
           <PosTabsBar
             orders={orderTabs}
             activeOrderId={activeOrderId}
-            onSelectOrder={setActiveOrderId}
-            onAddOrder={() => {}}
-            onCloseOrder={() => {}}
+            onSelectOrder={handleSelectOrderTab}
+            onAddOrder={handleAddOrderTab}
+            onCloseOrder={handleCloseOrderTab}
           />
 
           <PosCartTable
@@ -488,7 +620,19 @@ export default function PosPage() {
         </section>
 
         {/* RIGHT COLUMN (~60%): PRODUCT SEARCH & TOUCH GRID */}
-        <section className="w-full lg:w-[58%] xl:w-[62%] flex flex-col min-w-0 bg-surface-app h-full">
+        <section className="w-full lg:w-[58%] xl:w-[62%] flex flex-col min-w-0 bg-surface-app h-full relative">
+          {stockWarning && (
+            <div className="bg-rose-50 border-b border-rose-200 px-3 py-1.5 text-xs text-rose-700 font-medium flex items-center justify-between shrink-0">
+              <span>{stockWarning}</span>
+              <button
+                type="button"
+                onClick={() => setStockWarning(null)}
+                className="text-rose-600 hover:text-rose-900 font-bold ml-2"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           <PosProductGrid
             products={products}
             categories={categories}
@@ -498,6 +642,7 @@ export default function PosPage() {
             onSearchChange={setSearchQuery}
             onSearchSubmit={handleSearchSubmit}
             onProductClick={handleProductCardClick}
+            warehouseStockMap={warehouseStockMap}
             isLoading={isLoadingData}
             searchInputRef={searchInputRef}
           />

@@ -1,18 +1,38 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useStoreProfile } from "@/lib/store";
-import { Store, RefreshCw, CheckCircle2, AlertCircle, ShoppingCart } from "lucide-react";
+import { api, Warehouse as WarehouseType } from "@/lib/api";
+import {
+  Store,
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  Warehouse,
+  ChevronDown,
+} from "lucide-react";
 
-// ponytail: sticky app bar with connection poll; upgrade to websocket heartbeats if multi-node latency monitoring needed.
+// ponytail: sticky app bar with connection poll and warehouse indicator; upgrade to multi-tenant branch context if needed.
 export function Header() {
   const pathname = usePathname();
   const { storeSetting, fetchSettings, isLoading, error } = useStoreProfile();
+  const [warehouses, setWarehouses] = useState<WarehouseType[]>([]);
+  const [selectedWhId, setSelectedWhId] = useState<string>("");
 
   useEffect(() => {
     fetchSettings();
+    api
+      .getWarehouses(true)
+      .then((whs) => {
+        setWarehouses(whs || []);
+        if (whs && whs.length > 0) {
+          const def = whs.find((w) => w.is_default);
+          setSelectedWhId(def ? def.id : whs[0].id);
+        }
+      })
+      .catch(() => {});
   }, [fetchSettings]);
 
   if (pathname === "/pos" || pathname?.startsWith("/pos/")) {
@@ -36,6 +56,27 @@ export function Header() {
             {storeSetting?.costing_method || "WAC"}
           </span>
         </div>
+
+        {/* Warehouse Indicator */}
+        {warehouses.length > 0 && (
+          <>
+            <span className="text-border-default hidden md:inline">|</span>
+            <div className="hidden md:flex items-center gap-1.5 text-xs bg-surface-app border border-border-subtle rounded-lg px-2.5 py-1">
+              <Warehouse className="w-3.5 h-3.5 text-brand" />
+              <select
+                value={selectedWhId}
+                onChange={(e) => setSelectedWhId(e.target.value)}
+                className="bg-transparent text-text-main font-medium focus:outline-none cursor-pointer text-xs"
+              >
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} {w.is_default ? "★" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Right: Sync Status & Currency Indicator */}
@@ -60,17 +101,6 @@ export function Header() {
         <div className="text-xs font-medium text-text-sub bg-surface-muted px-2 py-1 rounded-sm border border-border-subtle tabular-nums font-mono">
           {storeSetting?.currency || "VND"}
         </div>
-
-        <Link
-          href="/pos"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-brand hover:bg-brand-hover text-white text-xs font-semibold shadow-sm transition-colors"
-        >
-          <ShoppingCart className="w-3.5 h-3.5" />
-          <span>Bán hàng POS</span>
-          <span className="bg-white/20 text-[10px] font-mono px-1 py-0.2 rounded text-white">
-            F8
-          </span>
-        </Link>
       </div>
     </header>
   );

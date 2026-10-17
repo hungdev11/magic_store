@@ -12,6 +12,8 @@ import (
 type PosSession struct {
 	ID                 string                `gorm:"primaryKey;size:64" json:"id"`
 	CashierName        string                `gorm:"not null" json:"cashier_name"`
+	WarehouseID        *string               `gorm:"size:64;index" json:"warehouse_id,omitempty"`
+	Warehouse          *Warehouse            `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
 	StartedAt          time.Time             `gorm:"default:CURRENT_TIMESTAMP" json:"started_at"`
 	ClosedAt           *time.Time            `json:"closed_at,omitempty"`
 	OpeningCash        decimal.Decimal       `gorm:"type:decimal(15,2);default:0" json:"opening_cash"`
@@ -39,10 +41,13 @@ type SalesOrder struct {
 	OrderNumber     string                `gorm:"uniqueIndex;not null" json:"order_number"`
 	CustomerID      *string               `gorm:"size:64;index" json:"customer_id,omitempty"`
 	Customer        *Partner              `gorm:"foreignKey:CustomerID" json:"customer,omitempty"`
-	PosSessionID    *string               `gorm:"size:64;index" json:"pos_session_id,omitempty"`
-	PosSession      *PosSession           `gorm:"foreignKey:PosSessionID" json:"pos_session,omitempty"`
-	Status          OrderStatus           `gorm:"size:50;index;default:'COMPLETED'" json:"status"`
-	Subtotal        decimal.Decimal       `gorm:"type:decimal(15,2);not null" json:"subtotal"`
+	WarehouseID     *string               `gorm:"size:64;index" json:"warehouse_id,omitempty"`
+	Warehouse       *Warehouse            `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
+	PosSessionID      *string               `gorm:"size:64;index" json:"pos_session_id,omitempty"`
+	PosSession        *PosSession           `gorm:"foreignKey:PosSessionID" json:"pos_session,omitempty"`
+	Status            OrderStatus           `gorm:"size:50;index;default:'COMPLETED'" json:"status"`
+	FulfillmentStatus FulfillmentStatus     `gorm:"size:50;index;default:'IMMEDIATE_FULFILLED'" json:"fulfillment_status"`
+	Subtotal          decimal.Decimal       `gorm:"type:decimal(15,2);not null" json:"subtotal"`
 	DiscountAmount  decimal.Decimal       `gorm:"type:decimal(15,2);default:0" json:"discount_amount"`
 	SurchargeAmount decimal.Decimal       `gorm:"type:decimal(15,2);default:0" json:"surcharge_amount"`
 	TotalAmount     decimal.Decimal       `gorm:"type:decimal(15,2);not null" json:"total_amount"`
@@ -74,7 +79,9 @@ type SalesOrderItem struct {
 	Batch                 *InventoryBatch  `gorm:"foreignKey:BatchID" json:"batch,omitempty"`
 	SoldUom               string           `gorm:"not null" json:"sold_uom"`
 	SoldQty               decimal.Decimal  `gorm:"type:decimal(12,4);not null" json:"sold_qty"`
-	ActualBaseQtyDeducted decimal.Decimal  `gorm:"type:decimal(12,4);not null" json:"actual_base_qty_deducted"`
+	EstimatedBaseQty      decimal.Decimal  `gorm:"type:decimal(15,4);default:0" json:"estimated_base_qty"`
+	ActualBaseQtyDeducted decimal.Decimal  `gorm:"type:decimal(15,4);not null" json:"actual_base_qty_deducted"`
+	SecondaryQty          *decimal.Decimal `gorm:"type:decimal(15,2)" json:"secondary_qty,omitempty"`
 	OriginalUnitPrice     decimal.Decimal  `gorm:"type:decimal(15,2);not null" json:"original_unit_price"`
 	ActualUnitPrice       decimal.Decimal  `gorm:"type:decimal(15,2);not null" json:"actual_unit_price"`
 	LineTotal             decimal.Decimal  `gorm:"type:decimal(15,2);default:0" json:"line_total"`

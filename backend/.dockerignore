@@ -1,0 +1,6 @@
+.git
+.gitignore
+uploads/*
+!uploads/.gitkeep
+magic_store.db
+*.exe

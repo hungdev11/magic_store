@@ -9,6 +9,7 @@ import {
   ProductVariant,
   WastageInput,
   InventoryReceipt,
+  Warehouse,
 } from "@/lib/api";
 import { formatVND, formatQty } from "@/lib/design-tokens";
 import {
@@ -105,10 +106,12 @@ export default function InventoryWastagePage() {
 
   // Master Data State
   const [products, setProducts] = useState<Product[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Form State
+  const [warehouseId, setWarehouseId] = useState<string>("");
   const [selectedVariantId, setSelectedVariantId] = useState<string>("");
   const [selectedBatchId, setSelectedBatchId] = useState<string>("");
   const [customBatchCode, setCustomBatchCode] = useState<string>("");
@@ -185,10 +188,18 @@ export default function InventoryWastagePage() {
     setIsLoading(true);
     setFetchError(null);
     try {
-      const data = await api.getProducts();
+      const [data, whsData] = await Promise.all([
+        api.getProducts(),
+        api.getWarehouses(true),
+      ]);
       setProducts(data || []);
+      setWarehouses(whsData || []);
+      if (whsData && whsData.length > 0) {
+        const def = whsData.find((w) => w.is_default);
+        setWarehouseId(def ? def.id : whsData[0].id);
+      }
     } catch (err: any) {
-      setFetchError(err.message || "Không thể tải danh sách sản phẩm");
+      setFetchError(err.message || "Không thể tải danh sách sản phẩm và kho hàng");
     } finally {
       setIsLoading(false);
     }
@@ -355,6 +366,7 @@ export default function InventoryWastagePage() {
 
       const payload: WastageInput = {
         variant_id: selectedVariantId,
+        warehouse_id: warehouseId || undefined,
         batch_id: selectedBatchId || undefined,
         lost_qty: parsedQty,
         input_uom: selectedItem.baseUom,
@@ -737,6 +749,29 @@ export default function InventoryWastagePage() {
                 <span className="text-xs text-text-sub font-mono">
                   Mã: {referenceId}
                 </span>
+              </div>
+
+              {/* Chọn Kho Xuất Hủy */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-text-main flex items-center justify-between">
+                  <span>
+                    Kho xuất hủy hàng <span className="text-rose-500">*</span>
+                  </span>
+                </label>
+                <select
+                  value={warehouseId}
+                  onChange={(e) => setWarehouseId(e.target.value)}
+                  className="w-full text-xs px-3 py-2 bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main font-medium"
+                >
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} {w.is_default ? "(Mặc định)" : ""}
+                    </option>
+                  ))}
+                  {warehouses.length === 0 && (
+                    <option value="">(Kho mặc định hệ thống)</option>
+                  )}
+                </select>
               </div>
 
               {/* 1. Chọn Sản phẩm & Biến thể */}

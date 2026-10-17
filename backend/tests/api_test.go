@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/shopspring/decimal"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	"magic_store/backend/internal/api"
@@ -870,5 +870,149 @@ func TestAPI_PosCheckout(t *testing.T) {
 	rec = executeRequest(srv, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400 for min selling price violation, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAPI_BOM_BackflushWithUntrackedInventoryAndAutoCost(t *testing.T) {
+	srv, db := setupAPITestServer(t)
+
+	cat := &model.Category{Name: "Đồ Uống Pha Chế", Code: "BEV_HANDMADE"}
+	db.Create(cat)
+
+	// Raw coffee: 50g @ 200 VND/g
+	prodCoffee := &model.Product{Name: "Cà phê Robusta", Code: "RAW_CF", CategoryID: cat.ID, ProductType: model.ProductTypeRawMaterial, BaseUom: "g"}
+	db.Create(prodCoffee)
+	varCoffee := &model.ProductVariant{ProductID: prodCoffee.ID, Sku: "SKU-RAW-CF", VariantName: "Cà phê", CurrentStock: decimal.NewFromInt(50), CostPrice: decimal.NewFromInt(200)}
+	db.Create(varCoffee)
+
+	// Raw milk: 50g @ 100 VND/g
+	prodMilk := &model.Product{Name: "Sữa dừa béo", Code: "RAW_COCONUT", CategoryID: cat.ID, ProductType: model.ProductTypeRawMaterial, BaseUom: "g"}
+	db.Create(prodMilk)
+	varMilk := &model.ProductVariant{ProductID: prodMilk.ID, Sku: "SKU-RAW-COCO", VariantName: "Sữa dừa", CurrentStock: decimal.NewFromInt(50), CostPrice: decimal.NewFromInt(100)}
+	db.Create(varMilk)
+
+	// Finished drink: TrackInventory = false, ProductionMode = NONE initially, CostPrice = 0
+	prodDrink := &model.Product{
+		Name:           "Cà Phê Cốt Dừa Đá",
+		Code:           "FG_COCO_COFFEE",
+		CategoryID:     cat.ID,
+		ProductType:    model.ProductTypeFinishedGood,
+		BaseUom:        "ly",
+		TrackInventory: false,
+		ProductionMode: model.ProductionModeNone,
+	}
+	db.Create(prodDrink)
+	db.Model(prodDrink).Update("track_inventory", false)
+
+	varDrink := &model.ProductVariant{
+		ProductID:        prodDrink.ID,
+		Sku:              "SKU-COCO-COFFEE",
+		VariantName:      "Cà Phê Cốt Dừa Ly Lớn",
+		CurrentStock:     decimal.Zero,
+		CostPrice:        decimal.Zero,
+		BaseSellingPrice: decimal.NewFromInt(35000),
+	}
+	db.Create(varDrink)
+
+	// 1. Create BOM recipe via API: 20g coffee + 30g milk = 20*200 + 30*100 = 7,000 VND
+	recipePayload := map[string]interface{}{
+		"target_variant_id":        varDrink.ID,
+		"recipe_type":              "ASSEMBLY",
+		"output_qty":               1,
+		"expected_wastage_percent": 0,
+		"items": []map[string]interface{}{
+			{"component_variant_id": varCoffee.ID, "qty_required": 20, "cost_allocation_percent": 0},
+			{"component_variant_id": varMilk.ID, "qty_required": 30, "cost_allocation_percent": 0},
+		},
+	}
+	body, _ := json.Marshal(recipePayload)
+	req, _ := http.NewRequest(http.MethodPost, "/api/bom/recipes", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := executeRequest(srv, req)
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("expected 201 for BOM recipe creation, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var createdRecipe model.BomRecipe
+	json.Unmarshal(rec.Body.Bytes(), &createdRecipe)
+	expectedUnitCost := decimal.NewFromInt(7000)
+	if !createdRecipe.EstimatedUnitCost.Equal(expectedUnitCost) {
+		t.Errorf("expected estimated unit cost %v, got %v", expectedUnitCost, createdRecipe.EstimatedUnitCost)
+	}
+
+	// Verify TargetVariant CostPrice updated in DB to 7,000
+	var checkVarDrink model.ProductVariant
+	db.First(&checkVarDrink, "id = ?", varDrink.ID)
+	if !checkVarDrink.CostPrice.Equal(expectedUnitCost) {
+		t.Errorf("expected variant CostPrice in DB %v, got %v", expectedUnitCost, checkVarDrink.CostPrice)
+	}
+
+	// Verify Product production_mode updated to POS_BACKFLUSH
+	var checkProdDrink model.Product
+	db.First(&checkProdDrink, "id = ?", prodDrink.ID)
+	if checkProdDrink.ProductionMode != model.ProductionModePosBackflush {
+		t.Errorf("expected production mode POS_BACKFLUSH, got %v", checkProdDrink.ProductionMode)
+	}
+
+	// 2. POS Checkout: Sell 2 cups
+	checkoutReq := map[string]interface{}{
+		"items": []map[string]interface{}{
+			{
+				"variant_id":               varDrink.ID,
+				"sold_uom":                 "ly",
+				"sold_qty":                 2,
+				"actual_base_qty_deducted": 2,
+				"actual_unit_price":        35000,
+				"is_return":                false,
+			},
+		},
+		"subtotal":       70000,
+		"total_amount":   70000,
+		"paid_amount":    70000,
+		"payment_method": "CASH",
+	}
+	body, _ = json.Marshal(checkoutReq)
+	req, _ = http.NewRequest(http.MethodPost, "/api/pos/checkout", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = executeRequest(srv, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected POS checkout status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var createdOrder model.SalesOrder
+	json.Unmarshal(rec.Body.Bytes(), &createdOrder)
+
+	// Verify total COGS: 2 * 7,000 = 14,000 VND
+	expectedTotalCogs := decimal.NewFromInt(14000)
+	if !createdOrder.TotalCogs.Equal(expectedTotalCogs) {
+		t.Errorf("expected total COGS %v, got %v", expectedTotalCogs, createdOrder.TotalCogs)
+	}
+
+	// Verify ingredients deducted:
+	// Coffee: 50 - 2*20 = 10g
+	var freshCoffee model.ProductVariant
+	db.First(&freshCoffee, "id = ?", varCoffee.ID)
+	if !freshCoffee.CurrentStock.Equal(decimal.NewFromInt(10)) {
+		t.Errorf("expected coffee stock 10, got %v", freshCoffee.CurrentStock)
+	}
+
+	// Milk: 50 - 2*30 = -10g
+	var freshMilk model.ProductVariant
+	db.First(&freshMilk, "id = ?", varMilk.ID)
+	if !freshMilk.CurrentStock.Equal(decimal.NewFromInt(-10)) {
+		t.Errorf("expected milk stock -10, got %v", freshMilk.CurrentStock)
+	}
+
+	// Finished drink stock: must NOT be decremented (stays 0) because TrackInventory = false
+	db.First(&checkVarDrink, "id = ?", varDrink.ID)
+	if !checkVarDrink.CurrentStock.Equal(decimal.Zero) {
+		t.Errorf("expected untracked drink stock to remain 0, got %v", checkVarDrink.CurrentStock)
+	}
+
+	// 3. Test POST /api/bom/recipes/{id}/sync-cost
+	syncReq, _ := http.NewRequest(http.MethodPost, "/api/bom/recipes/"+createdRecipe.ID+"/sync-cost", nil)
+	recSync := executeRequest(srv, syncReq)
+	if recSync.Code != http.StatusOK {
+		t.Fatalf("expected sync-cost status 200, got %d: %s", recSync.Code, recSync.Body.String())
 	}
 }

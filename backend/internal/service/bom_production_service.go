@@ -43,16 +43,19 @@ type DisassemblyParams struct {
 type BackflushItem struct {
 	VariantID     string
 	Qty           decimal.Decimal
+	WarehouseID   *string
 	ModifiersJSON string
 	ReferenceID   *string
 }
 
 type BackflushParams struct {
-	Items []BackflushItem
+	WarehouseID *string
+	Items       []BackflushItem
 }
 
 type WastageParams struct {
 	VariantID        string
+	WarehouseID      *string
 	BatchID          *string
 	LostQty          decimal.Decimal
 	InputUOM         string
@@ -438,8 +441,13 @@ func (s *BOMProductionService) ExecuteBackflushDeduction(ctx context.Context, tx
 				}
 
 				note := "Backflush BOM ingredient deduction"
+				whID := item.WarehouseID
+				if whID == nil || *whID == "" {
+					whID = params.WarehouseID
+				}
 				mov, err := s.ledgerService.RecordMovement(ctx, db, RecordMovementParams{
 					VariantID:      bomItem.ComponentVariantID,
+					WarehouseID:    whID,
 					MovementType:   model.MovementTypeProductionConsume,
 					QtyInBaseUom:   neededQty.Neg(),
 					InputUOM:       uom,
@@ -527,8 +535,13 @@ func (s *BOMProductionService) ExecuteBackflushDeduction(ctx context.Context, tx
 				}
 
 				note := fmt.Sprintf("Backflush modifier deduction: %s", mod.Name)
+				whID := item.WarehouseID
+				if whID == nil || *whID == "" {
+					whID = params.WarehouseID
+				}
 				mov, err := s.ledgerService.RecordMovement(ctx, db, RecordMovementParams{
 					VariantID:      targetVariant.ID,
+					WarehouseID:    whID,
 					MovementType:   model.MovementTypeProductionConsume,
 					QtyInBaseUom:   totalModifierDeduct.Neg(),
 					InputUOM:       uom,
@@ -596,6 +609,7 @@ func (s *BOMProductionService) RecordWastage(ctx context.Context, tx *gorm.DB, p
 
 	mov, err := s.ledgerService.RecordMovement(ctx, db, RecordMovementParams{
 		VariantID:      params.VariantID,
+		WarehouseID:    params.WarehouseID,
 		BatchID:        params.BatchID,
 		MovementType:   model.MovementTypeWastageSpoilage,
 		QtyInBaseUom:   lostBaseQty.Neg(),
@@ -632,4 +646,137 @@ func (s *BOMProductionService) RecordWastage(ctx context.Context, tx *gorm.DB, p
 	}
 
 	return mov, cashTx, nil
+}
+
+// CalculateRecipeCost computes the unit cost of target variant based on component variants' CostPrice and recipe output_qty / wastage.
+// ponytail: cost computed from direct material cost and expected wastage; upgrade to overhead rate absorption if needed.
+func (s *BOMProductionService) CalculateRecipeCost(ctx context.Context, tx *gorm.DB, recipeID string) (decimal.Decimal, error) {
+	db := tx
+	if db == nil {
+		db = s.db
+	}
+	db = db.WithContext(ctx)
+
+	var recipe model.BomRecipe
+	if err := db.Preload("Items.ComponentVariant").First(&recipe, "id = ?", recipeID).Error; err != nil {
+		return decimal.Zero, err
+	}
+
+	return s.calculateRecipeUnitCost(&recipe), nil
+}
+
+func (s *BOMProductionService) calculateRecipeUnitCost(recipe *model.BomRecipe) decimal.Decimal {
+	if recipe == nil || len(recipe.Items) == 0 {
+		return decimal.Zero
+	}
+
+	totalMaterialCost := decimal.Zero
+	for _, it := range recipe.Items {
+		var compCost decimal.Decimal
+		if it.ComponentVariant != nil {
+			compCost = it.ComponentVariant.CostPrice
+		}
+		itemCost := it.QtyRequired.Mul(compCost)
+		totalMaterialCost = totalMaterialCost.Add(itemCost)
+	}
+
+	outQty := recipe.OutputQty
+	if outQty.LessThanOrEqual(decimal.Zero) {
+		outQty = decimal.NewFromInt(1)
+	}
+
+	unitCost := totalMaterialCost.Div(outQty)
+
+	// Adjust for expected wastage if > 0 and < 100
+	if recipe.ExpectedWastagePercent.GreaterThan(decimal.Zero) && recipe.ExpectedWastagePercent.LessThan(decimal.NewFromInt(100)) {
+		effectiveYieldRate := decimal.NewFromInt(1).Sub(recipe.ExpectedWastagePercent.Div(decimal.NewFromInt(100)))
+		if effectiveYieldRate.GreaterThan(decimal.Zero) {
+			unitCost = unitCost.Div(effectiveYieldRate)
+		}
+	}
+
+	return unitCost.Round(2)
+}
+
+// CalculateVariantBOMCost finds active assembly recipe for variant and computes its unit cost.
+func (s *BOMProductionService) CalculateVariantBOMCost(ctx context.Context, tx *gorm.DB, variantID string) (decimal.Decimal, *model.BomRecipe, error) {
+	db := tx
+	if db == nil {
+		db = s.db
+	}
+	db = db.WithContext(ctx)
+
+	var recipe model.BomRecipe
+	err := db.Preload("Items.ComponentVariant").
+		Where("target_variant_id = ? AND recipe_type = ?", variantID, model.RecipeTypeAssembly).
+		First(&recipe).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return decimal.Zero, nil, nil
+		}
+		return decimal.Zero, nil, err
+	}
+
+	return s.calculateRecipeUnitCost(&recipe), &recipe, nil
+}
+
+// SyncVariantCostFromBOM updates the target variant's CostPrice based on its BOM recipe.
+func (s *BOMProductionService) SyncVariantCostFromBOM(ctx context.Context, tx *gorm.DB, variantID string) (decimal.Decimal, error) {
+	db := tx
+	if db == nil {
+		db = s.db
+	}
+	db = db.WithContext(ctx)
+
+	unitCost, recipe, err := s.CalculateVariantBOMCost(ctx, db, variantID)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	if recipe == nil {
+		return decimal.Zero, nil
+	}
+
+	if unitCost.GreaterThan(decimal.Zero) {
+		if err := db.Model(&model.ProductVariant{}).Where("id = ?", variantID).Update("cost_price", unitCost).Error; err != nil {
+			return decimal.Zero, err
+		}
+	}
+
+	return unitCost, nil
+}
+
+// SyncBOMCostsForComponent finds all recipes using componentVariantID and updates their target variant costs.
+func (s *BOMProductionService) SyncBOMCostsForComponent(ctx context.Context, tx *gorm.DB, componentVariantID string) error {
+	db := tx
+	if db == nil {
+		db = s.db
+	}
+	db = db.WithContext(ctx)
+
+	var recipeIDs []string
+	if err := db.Model(&model.BomItem{}).
+		Where("component_variant_id = ?", componentVariantID).
+		Pluck("recipe_id", &recipeIDs).Error; err != nil {
+		return err
+	}
+
+	if len(recipeIDs) == 0 {
+		return nil
+	}
+
+	var recipes []model.BomRecipe
+	if err := db.Preload("Items.ComponentVariant").
+		Where("id IN ? AND recipe_type = ?", recipeIDs, model.RecipeTypeAssembly).
+		Find(&recipes).Error; err != nil {
+		return err
+	}
+
+	for _, rec := range recipes {
+		cost := s.calculateRecipeUnitCost(&rec)
+		if cost.GreaterThan(decimal.Zero) {
+			_ = db.Model(&model.ProductVariant{}).Where("id = ?", rec.TargetVariantID).Update("cost_price", cost).Error
+		}
+	}
+
+	return nil
 }

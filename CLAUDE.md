@@ -53,3 +53,54 @@ magic_store/
 - **Số liệu tài chính & kho (Tabular Numerals)**: Mọi ô tiền tệ, số lượng, phần trăm phải có class `tabular-nums` để tránh lệch cột.
 - **Mật độ thông tin cao (High Density - Operate Mode)**: Micro-ERP & POS hướng tới hiệu quả thao tác nhanh của thu ngân và quản lý kho.
 - **Đầy đủ 4 trạng thái**: Mọi màn hình tải dữ liệu phải xử lý rõ ràng: Loading, Empty, Error, Success Feedback qua các component dùng chung.
+
+## 4. Đặc Tả Đa Kho, Đơn Vị Kép & Xử Lý Đơn Hàng Đồng Thời (Multi-Warehouse, Dual-UOM & Concurrent Order Engine)
+
+### 4.1. Cấu Trúc Bảng Đa Kho & 4 Trạng Thái Tồn Kho (Warehouse Stock Balances)
+Không lưu tồn kho trực tiếp trên bảng `product_variants`. Dùng bảng `warehouse_stock_balances` với composite key `[warehouse_id, variant_id]`, hỗ trợ song song Base UOM (gram, cái, ml) và Secondary Catch-Weight UOM (con cá, khay, bao):
+- `warehouses`:
+  - `id`, `code`, `name` (ví dụ: "Kho Đông Lạnh Tổng", "Quầy Bán Lẻ Chợ", "Bếp Chế Biến", "Cửa Hàng Quận 1"), `type` (`STORAGE`, `RETAIL_POS`, `KITCHEN_WIP`, `VIRTUAL_TRANSIT`), `allow_negative_stock` (boolean).
+- `warehouse_stock_balances` (`[warehouse_id, variant_id]`):
+  - `on_hand_base_qty` (`DECIMAL(15,4)`): Tồn kho vật lý thực tế trên kệ theo Base UOM.
+  - `reserved_base_qty` (`DECIMAL(15,4)`): Tồn kho giữ chỗ cho các đơn hàng chưa hoàn tất.
+  - `locked_base_qty` (`DECIMAL(15,4)`): Tồn kho phong tỏa / hỏng / hết hạn chờ tiêu hủy.
+  - `in_transit_base_qty` (`DECIMAL(15,4)`): Hàng đang chuyển từ kho khác tới chưa ký nhận.
+  - `on_hand_secondary_qty` (`DECIMAL(15,2)`, nullable): Số đếm vật lý mặt hàng trọng lượng động (ví dụ: `18 con cá`).
+  - `reserved_secondary_qty` (`DECIMAL(15,2)`, nullable): Số đếm giữ chỗ cho hàng trọng lượng động.
+  - `warehouse_wac_cost` (`DECIMAL(15,4)`): Giá vốn bình quân gia quyền tại kho (hoặc global WAC).
+  - `version` (`INT`): Optimistic concurrency control counter.
+- **Công thức bán được (Available to Promise):**
+  $$Q_{\text{available}} = Q_{\text{on\_hand\_base}} - Q_{\text{reserved\_base}} - Q_{\text{locked\_base}}$$
+
+### 4.2. Quy Tắc Đơn Vị Tính & Trọng Lượng Động (Multi-UOM & Catch-Weight)
+1. **Lưu trữ đơn vị nguyên tử (Atomic Base Unit):** Mọi đại lượng tuyến tính lưu bằng đơn vị nhỏ nhất không thể chia tách (`g`, `ml`, `pc`) hoặc số thập phân chuẩn (`DECIMAL(15,4)`).
+2. **Hàm giải rã đa đơn vị đọc được (`formatMultiUomStock`):**
+   - Với `baseQty = 53` và phân cấp UOM `[{name: 'Thùng', factor: 24}, {name: 'Lốc', factor: 6}, {name: 'Lon', factor: 1}]`, hiển thị cả tổng gốc (`53 Lon`) và phân rã vật lý (`2 Thùng, 5 Lon lẻ`).
+3. **Quy tắc Auto-Zeroing hao hụt tự nhiên (Thịt/Cá tươi sống):**
+   - Khi bán hết con cuối cùng (`on_hand_secondary_qty` từ `1 Con` về `0 Con`), nếu `on_hand_base_qty` còn số dư nhỏ (ví dụ `0.35 kg` do mất nước / sai số cân), hệ thống tự động kết chuyển phần dư thành bút toán hao hụt `NATURAL_SHRINKAGE`, đưa cả 2 số tồn về `0`.
+
+### 4.3. Máy Trạng Thái Giữ Hàng & Xuất Hàng Đồng Thời (Concurrency Engine)
+Hỗ trợ 2 luồng bán song song trên cùng một kho:
+- **Luồng A: Bán trực tiếp tại POS (`IMMEDIATE_SALE`):**
+  - Update nguyên tử có điều kiện (Atomic conditional update):
+    ```sql
+    UPDATE warehouse_stock_balances
+    SET on_hand_base_qty = on_hand_base_qty - :sold_qty,
+        version = version + 1,
+        updated_at = NOW()
+    WHERE warehouse_id = :warehouse_id AND variant_id = :variant_id
+      AND (on_hand_base_qty - reserved_base_qty - locked_base_qty) >= :sold_qty;
+    ```
+- **Luồng B: Đơn đa kênh / Giao hàng / Bếp (`RESERVE_THEN_FULFILL`):**
+  - **Bước 1 (`RESERVE`):** Chốt đơn $\rightarrow$ tăng `reserved_base_qty` theo `estimated_base_qty`. Không trừ `on_hand_base_qty`.
+  - **Bước 2 (`PICK_AND_WEIGH`):** Nhân viên kho nhặt hàng hoặc cân thực tế $\rightarrow$ xác định `actual_fulfilled_base_qty`.
+  - **Bước 3 (`SHIP_COMMIT`):** Transaction nguyên tử:
+    - Trừ `reserved_base_qty` theo `estimated_base_qty`.
+    - Trừ `on_hand_base_qty` theo `actual_fulfilled_base_qty`.
+    - Ghi nhận `SALE_OUT` vào `inventory_movements` theo `actual_fulfilled_base_qty`.
+  - **Bước 4 (`CANCEL_RELEASE`):** Hủy đơn trước khi xuất $\rightarrow$ trừ `reserved_base_qty` giải phóng tồn kho.
+
+### 4.4. Quy Trình Chuyển Kho 2 Pha (`stock_transfers`)
+- **Bước 1 (`DISPATCH` từ Kho A):** Trừ `A.on_hand_base_qty` đi `sent_qty`; cộng `B.in_transit_base_qty` thêm `sent_qty`.
+- **Bước 2 (`RECEIVE` tại Kho B):** Nhập `actual_received_qty`. Trừ `B.in_transit_base_qty` đi `sent_qty`; cộng `B.on_hand_base_qty` thêm `actual_received_qty`. Nếu `actual_received_qty < sent_qty`, ghi nhận chênh lệch vào sổ cái dạng `TRANSIT_WASTAGE`.
+

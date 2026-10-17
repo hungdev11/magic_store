@@ -16,6 +16,7 @@ type BomRecipe struct {
 	RecipeType             RecipeType        `gorm:"size:50;not null" json:"recipe_type"`
 	OutputQty              decimal.Decimal   `gorm:"type:decimal(12,4);not null" json:"output_qty"`
 	ExpectedWastagePercent decimal.Decimal   `gorm:"type:decimal(5,2);default:0" json:"expected_wastage_percent"`
+	EstimatedUnitCost      decimal.Decimal   `gorm:"-" json:"estimated_unit_cost,omitempty"`
 	Items                  []BomItem         `gorm:"foreignKey:RecipeID;constraint:OnDelete:CASCADE" json:"items,omitempty"`
 	ProductionOrders       []ProductionOrder `gorm:"foreignKey:RecipeID" json:"production_orders,omitempty"`
 	CreatedAt              time.Time         `json:"created_at"`

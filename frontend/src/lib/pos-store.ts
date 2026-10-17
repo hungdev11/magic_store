@@ -82,6 +82,7 @@ export interface PosState {
   toggleItemReturn: (id: string) => void;
   removeItem: (id: string) => void;
   clearCart: () => void;
+  setCart: (cart: PosCartItem[]) => void;
 
   // Checkout State Setters
   setCustomer: (customer: Partner | null) => void;
@@ -92,7 +93,7 @@ export interface PosState {
   setOnlineStatus: (status: boolean) => void;
 
   // POS Checkout & Offline Queue Operations
-  checkout: (notes?: string) => Promise<PosCheckoutResponse>;
+  checkout: (notes?: string, warehouseId?: string) => Promise<PosCheckoutResponse>;
   syncOfflineQueue: () => Promise<number>;
   removeOfflineOrder: (id: string) => void;
   clearOfflineQueue: () => void;
@@ -388,6 +389,8 @@ export const usePosStore = create<PosState>()(
         });
       },
 
+      setCart: (cart: PosCartItem[]) => set({ cart }),
+
       setCustomer: customer => set({ selectedCustomer: customer }),
       setDiscount: amount => set({ discountAmount: Math.max(0, amount) }),
       setSurcharge: amount => set({ surchargeAmount: Math.max(0, amount) }),
@@ -395,7 +398,7 @@ export const usePosStore = create<PosState>()(
       setPaymentMethod: method => set({ paymentMethod: method }),
       setOnlineStatus: status => set({ isOnline: status }),
 
-      checkout: async notes => {
+      checkout: async (notes, warehouseId) => {
         const {
           cart,
           selectedCustomer,
@@ -428,6 +431,7 @@ export const usePosStore = create<PosState>()(
         }
 
         const payload: PosCheckoutPayload = {
+          warehouse_id: warehouseId,
           customer_id: selectedCustomer?.id,
           items: cart.map(item => ({
             variant_id: item.variantId,

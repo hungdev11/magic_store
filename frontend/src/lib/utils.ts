@@ -26,6 +26,17 @@ export function getVariantStock(v?: ProductVariant): number {
   return Number(val) || 0;
 }
 
+export function getVariantAvailableStock(
+  v?: ProductVariant,
+  warehouseStockMap?: Map<string, number>
+): number {
+  if (!v) return 0;
+  if (warehouseStockMap && warehouseStockMap.has(v.id)) {
+    return warehouseStockMap.get(v.id) ?? 0;
+  }
+  return getVariantStock(v);
+}
+
 export function getProductTotalStock(p: Product): number {
   if (!p.variants || p.variants.length === 0) return 0;
   return p.variants.reduce((acc, v) => acc + getVariantStock(v), 0);

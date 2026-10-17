@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -379,7 +380,7 @@ func (s *Server) handleDeleteUnit(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetCategories(w http.ResponseWriter, r *http.Request) {
 	var categories []model.Category
-	if err := s.db.Find(&categories).Error; err != nil {
+	if err := s.db.Preload("Parent").Find(&categories).Error; err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -520,8 +521,70 @@ func (s *Server) handleDeleteCategory(w http.ResponseWriter, r *http.Request) {
 // ----------------------------------------------------------------------------
 
 func (s *Server) handleGetProducts(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	catID := strings.TrimSpace(r.URL.Query().Get("category_id"))
+	prodType := strings.TrimSpace(r.URL.Query().Get("product_type"))
+	archetype := strings.TrimSpace(r.URL.Query().Get("archetype"))
+	pageStr := strings.TrimSpace(r.URL.Query().Get("page"))
+	pageSizeStr := strings.TrimSpace(r.URL.Query().Get("page_size"))
+
+	query := s.db.Model(&model.Product{})
+	if q != "" {
+		like := "%" + q + "%"
+		query = query.Where("name LIKE ? OR code LIKE ? OR id IN (SELECT product_id FROM product_variants WHERE sku LIKE ? OR variant_name LIKE ?)", like, like, like, like)
+	}
+	if catID != "" && catID != "ALL" {
+		query = query.Where("category_id = ?", catID)
+	}
+	if prodType != "" && prodType != "ALL" {
+		query = query.Where("product_type = ?", prodType)
+	}
+	if archetype != "" && archetype != "ALL" {
+		query = query.Where("archetype = ?", archetype)
+	}
+
+	var total int64
+	query.Count(&total)
+
+	if pageStr != "" || pageSizeStr != "" {
+		page, _ := strconv.Atoi(pageStr)
+		if page < 1 {
+			page = 1
+		}
+		pageSize, _ := strconv.Atoi(pageSizeStr)
+		if pageSize < 1 || pageSize > 100 {
+			pageSize = 20
+		}
+		offset := (page - 1) * pageSize
+
+		var products []model.Product
+		if err := query.Preload("Variants.Batches", "remaining_qty > 0").
+			Preload("Variants.UomConversions").
+			Preload("Variants").
+			Preload("Category").
+			Order("created_at desc").
+			Limit(pageSize).
+			Offset(offset).
+			Find(&products).Error; err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"items":     products,
+			"total":     total,
+			"page":      page,
+			"page_size": pageSize,
+		})
+		return
+	}
+
 	var products []model.Product
-	if err := s.db.Preload("Variants.Batches", "remaining_qty > 0").Preload("Variants.UomConversions").Preload("Variants").Preload("Category").Find(&products).Error; err != nil {
+	if err := query.Preload("Variants.Batches", "remaining_qty > 0").
+		Preload("Variants.UomConversions").
+		Preload("Variants").
+		Preload("Category").
+		Order("created_at desc").
+		Find(&products).Error; err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -533,24 +596,52 @@ type CreateUomConversionDTO struct {
 	ConversionFactor   decimal.Decimal  `json:"conversion_factor"`
 	IsVariableRatio    bool             `json:"is_variable_ratio"`
 	DefaultPriceForUom *decimal.Decimal `json:"default_price_for_uom,omitempty"`
+	Barcode            *string          `json:"barcode,omitempty"`
+	SellingPrice       *decimal.Decimal `json:"selling_price,omitempty"`
 }
 
 type CreateProductDTO struct {
-	Name             string                   `json:"name"`
-	Code             string                   `json:"code"`
-	CategoryID       string                   `json:"category_id"`
-	ProductType      model.ProductType        `json:"product_type"`
-	BaseUom          string                   `json:"base_uom"`
-	IsWeighable      bool                     `json:"is_weighable"`
-	TrackInventory   *bool                    `json:"track_inventory"`
-	TrackBatches     bool                     `json:"track_batches"`
-	ProductionMode   model.ProductionMode     `json:"production_mode"`
-	CostPrice        decimal.Decimal          `json:"cost_price"`
-	BaseSellingPrice decimal.Decimal          `json:"base_selling_price"`
-	MinSellingPrice  decimal.Decimal          `json:"min_selling_price"`
-	MatrixAttributes map[string][]string      `json:"matrix_attributes"`
-	UomConversions   []CreateUomConversionDTO `json:"uom_conversions"`
-	Variants         []model.ProductVariant   `json:"variants"`
+	Name              string                   `json:"name"`
+	Code              string                   `json:"code"`
+	CategoryID        string                   `json:"category_id"`
+	ProductType       model.ProductType        `json:"product_type"`
+	Archetype         model.ProductArchetype   `json:"archetype"`
+	BaseUom           string                   `json:"base_uom"`
+	IsWeighable       bool                     `json:"is_weighable"`
+	TrackInventory    *bool                    `json:"track_inventory"`
+	TrackBatches      bool                     `json:"track_batches"`
+	ShelfLifeDays     *int                     `json:"shelf_life_days"`
+	ExpiryWarningDays *int                     `json:"expiry_warning_days"`
+	ProductionMode    model.ProductionMode     `json:"production_mode"`
+	ImageURL          string                   `json:"image_url"`
+	CostPrice         decimal.Decimal          `json:"cost_price"`
+	BaseSellingPrice  decimal.Decimal          `json:"base_selling_price"`
+	MinSellingPrice   decimal.Decimal          `json:"min_selling_price"`
+	MatrixAttributes  map[string][]string      `json:"matrix_attributes"`
+	UomConversions    []CreateUomConversionDTO `json:"uom_conversions"`
+	Variants          []model.ProductVariant   `json:"variants"`
+}
+
+func ensureUnitExists(db *gorm.DB, name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	var count int64
+	db.Model(&model.Unit{}).Where("LOWER(name) = ?", strings.ToLower(name)).Count(&count)
+	if count == 0 {
+		slug := slugifyVietnamese(name)
+		if slug == "" {
+			slug = strings.ToUpper(name)
+		}
+		u := model.Unit{
+			ID:       uuid.New().String(),
+			Name:     name,
+			Code:     slug,
+			IsActive: true,
+		}
+		_ = db.Create(&u).Error
+	}
 }
 
 func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
@@ -563,6 +654,9 @@ func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 	if input.ProductType == "" {
 		input.ProductType = model.ProductTypeFinishedGood
 	}
+	if input.Archetype == "" {
+		input.Archetype = model.ProductArchetypeStandard
+	}
 	if input.ProductionMode == "" {
 		input.ProductionMode = model.ProductionModeNone
 	}
@@ -571,18 +665,27 @@ func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 		trackInv = *input.TrackInventory
 	}
 
+	ensureUnitExists(s.db, input.BaseUom)
+	for _, uom := range input.UomConversions {
+		ensureUnitExists(s.db, uom.UomName)
+	}
+
 	productID := uuid.New().String()
 	product := model.Product{
-		ID:             productID,
-		Name:           input.Name,
-		Code:           input.Code,
-		CategoryID:     input.CategoryID,
-		ProductType:    input.ProductType,
-		BaseUom:        input.BaseUom,
-		IsWeighable:    input.IsWeighable,
-		TrackInventory: trackInv,
-		TrackBatches:   input.TrackBatches,
-		ProductionMode: input.ProductionMode,
+		ID:                productID,
+		Name:              input.Name,
+		Code:              input.Code,
+		CategoryID:        input.CategoryID,
+		ProductType:       input.ProductType,
+		Archetype:         input.Archetype,
+		BaseUom:           input.BaseUom,
+		IsWeighable:       input.IsWeighable,
+		TrackInventory:    trackInv,
+		TrackBatches:      input.TrackBatches,
+		ShelfLifeDays:     input.ShelfLifeDays,
+		ExpiryWarningDays: input.ExpiryWarningDays,
+		ProductionMode:    input.ProductionMode,
+		ImageURL:          input.ImageURL,
 	}
 
 	if len(input.MatrixAttributes) > 0 {
@@ -621,6 +724,8 @@ func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 					ConversionFactor:   uom.ConversionFactor,
 					IsVariableRatio:    uom.IsVariableRatio,
 					DefaultPriceForUom: uom.DefaultPriceForUom,
+					Barcode:            uom.Barcode,
+					SellingPrice:       uom.SellingPrice,
 				})
 			}
 			product.Variants = append(product.Variants, variant)
@@ -640,6 +745,8 @@ func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 						ConversionFactor:   uom.ConversionFactor,
 						IsVariableRatio:    uom.IsVariableRatio,
 						DefaultPriceForUom: uom.DefaultPriceForUom,
+					Barcode:            uom.Barcode,
+					SellingPrice:       uom.SellingPrice,
 					})
 				}
 			}
@@ -666,6 +773,8 @@ func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 				ConversionFactor:   uom.ConversionFactor,
 				IsVariableRatio:    uom.IsVariableRatio,
 				DefaultPriceForUom: uom.DefaultPriceForUom,
+					Barcode:            uom.Barcode,
+					SellingPrice:       uom.SellingPrice,
 			})
 		}
 		product.Variants = append(product.Variants, variant)
@@ -674,6 +783,9 @@ func (s *Server) handleCreateProduct(w http.ResponseWriter, r *http.Request) {
 	if err := s.db.Create(&product).Error; err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if !trackInv {
+		s.db.Model(&product).Update("track_inventory", false)
 	}
 
 	var created model.Product
@@ -882,6 +994,481 @@ func (s *Server) handleDeletePartner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+
+// ----------------------------------------------------------------------------
+// Warehouse & Stock Transfer Handlers
+// ----------------------------------------------------------------------------
+
+type WarehouseDTO struct {
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	Address   string `json:"address"`
+	IsActive  *bool  `json:"is_active"`
+	IsDefault *bool  `json:"is_default"`
+}
+
+func (s *Server) handleGetWarehouses(w http.ResponseWriter, r *http.Request) {
+	var count int64
+	s.db.Model(&model.Warehouse{}).Count(&count)
+	if count == 0 {
+		defWH := model.Warehouse{
+			ID:        uuid.New().String(),
+			Code:      "KHO_TONG",
+			Name:      "Kho Tổng (Mặc định)",
+			Address:   "Trụ sở chính",
+			IsActive:  true,
+			IsDefault: true,
+		}
+		_ = s.db.Create(&defWH).Error
+	}
+
+	query := s.db.Model(&model.Warehouse{})
+	if r.URL.Query().Get("active_only") == "true" {
+		query = query.Where("is_active = ?", true)
+	}
+
+	var warehouses []model.Warehouse
+	if err := query.Order("is_default desc, code asc").Find(&warehouses).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, warehouses)
+}
+
+func (s *Server) handleCreateWarehouse(w http.ResponseWriter, r *http.Request) {
+	var input WarehouseDTO
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "warehouse name is required")
+		return
+	}
+
+	code := strings.ToUpper(strings.TrimSpace(input.Code))
+	if code == "" {
+		code = slugifyVietnamese(name)
+		if code == "" {
+			code = "WH_" + uuid.New().String()[:8]
+		}
+	}
+
+	isActive := true
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+
+	isDefault := false
+	if input.IsDefault != nil {
+		isDefault = *input.IsDefault
+	}
+
+	if isDefault {
+		_ = s.db.Model(&model.Warehouse{}).Where("is_default = ?", true).Update("is_default", false).Error
+	}
+
+	wh := model.Warehouse{
+		ID:        uuid.New().String(),
+		Code:      code,
+		Name:      name,
+		Address:   strings.TrimSpace(input.Address),
+		IsActive:  isActive,
+		IsDefault: isDefault,
+	}
+
+	if err := s.db.Create(&wh).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, wh)
+}
+
+func (s *Server) handleUpdateWarehouse(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "warehouse id is required")
+		return
+	}
+
+	var wh model.Warehouse
+	if err := s.db.First(&wh, "id = ?", id).Error; err != nil {
+		writeError(w, http.StatusNotFound, "warehouse not found")
+		return
+	}
+
+	var input WarehouseDTO
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if trimmed := strings.TrimSpace(input.Name); trimmed != "" {
+		wh.Name = trimmed
+	}
+	if trimmed := strings.ToUpper(strings.TrimSpace(input.Code)); trimmed != "" {
+		wh.Code = trimmed
+	}
+	if input.Address != "" {
+		wh.Address = strings.TrimSpace(input.Address)
+	}
+	if input.IsActive != nil {
+		wh.IsActive = *input.IsActive
+	}
+	if input.IsDefault != nil && *input.IsDefault {
+		wh.IsDefault = true
+		_ = s.db.Model(&model.Warehouse{}).Where("id != ?", id).Update("is_default", false).Error
+	}
+
+	if err := s.db.Save(&wh).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, wh)
+}
+
+func (s *Server) handleDeleteWarehouse(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var count int64
+	s.db.Model(&model.WarehouseStock{}).Where("warehouse_id = ? AND current_stock > 0", id).Count(&count)
+	if count > 0 {
+		writeError(w, http.StatusConflict, "Kho đang có hàng tồn, không thể xóa.")
+		return
+	}
+
+	if err := s.db.Delete(&model.Warehouse{}, "id = ?", id).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+type VariantWarehouseStockDTO struct {
+	WarehouseID   string           `json:"warehouse_id"`
+	WarehouseName string           `json:"warehouse_name"`
+	Stock         decimal.Decimal  `json:"stock"`
+	OnHand        decimal.Decimal  `json:"on_hand"`
+	Reserved      decimal.Decimal  `json:"reserved"`
+	Locked        decimal.Decimal  `json:"locked"`
+	InTransit     decimal.Decimal  `json:"in_transit"`
+	Available     decimal.Decimal  `json:"available"`
+	SecondaryQty  *decimal.Decimal `json:"secondary_qty,omitempty"`
+}
+
+type VariantStockReportDTO struct {
+	VariantID      string                     `json:"variant_id"`
+	ProductID      string                     `json:"product_id"`
+	ProductName    string                     `json:"product_name"`
+	VariantName    string                     `json:"variant_name"`
+	SKU            string                     `json:"sku"`
+	BaseUom        string                     `json:"base_uom"`
+	TotalStock     decimal.Decimal            `json:"total_stock"`
+	TotalOnHand    decimal.Decimal            `json:"total_on_hand"`
+	TotalReserved  decimal.Decimal            `json:"total_reserved"`
+	TotalAvailable decimal.Decimal            `json:"total_available"`
+	ByWarehouse    []VariantWarehouseStockDTO `json:"by_warehouse"`
+}
+
+func (s *Server) handleGetWarehouseStock(w http.ResponseWriter, r *http.Request) {
+	var warehouses []model.Warehouse
+	if err := s.db.Where("is_active = ?", true).Order("is_default desc, code asc").Find(&warehouses).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var variants []model.ProductVariant
+	if err := s.db.Preload("Product").Find(&variants).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var allStocks []model.WarehouseStock
+	_ = s.db.Find(&allStocks).Error
+	stockMap := make(map[string]map[string]decimal.Decimal)
+	for _, st := range allStocks {
+		if stockMap[st.VariantID] == nil {
+			stockMap[st.VariantID] = make(map[string]decimal.Decimal)
+		}
+		stockMap[st.VariantID][st.WarehouseID] = st.CurrentStock
+	}
+
+	var allBalances []model.WarehouseStockBalance
+	_ = s.db.Find(&allBalances).Error
+	balMap := make(map[string]map[string]model.WarehouseStockBalance)
+	for _, bal := range allBalances {
+		if balMap[bal.VariantID] == nil {
+			balMap[bal.VariantID] = make(map[string]model.WarehouseStockBalance)
+		}
+		balMap[bal.VariantID][bal.WarehouseID] = bal
+	}
+
+	report := make([]VariantStockReportDTO, 0, len(variants))
+	for _, v := range variants {
+		pName := ""
+		baseUom := ""
+		if v.Product != nil {
+			pName = v.Product.Name
+			baseUom = v.Product.BaseUom
+		}
+
+		totalOnHand := decimal.Zero
+		totalReserved := decimal.Zero
+		totalAvailable := decimal.Zero
+
+		byWh := make([]VariantWarehouseStockDTO, 0, len(warehouses))
+		for _, wh := range warehouses {
+			st := decimal.Zero
+			if m, ok := stockMap[v.ID]; ok {
+				st = m[wh.ID]
+			}
+
+			onHand := st
+			reserved := decimal.Zero
+			locked := decimal.Zero
+			inTransit := decimal.Zero
+			available := st
+			var secQty *decimal.Decimal
+
+			if bm, ok := balMap[v.ID]; ok {
+				if b, hasBal := bm[wh.ID]; hasBal {
+					onHand = b.OnHandBaseQty
+					reserved = b.ReservedBaseQty
+					locked = b.LockedBaseQty
+					inTransit = b.InTransitBaseQty
+					available = b.AvailableBaseQty()
+					secQty = b.OnHandSecondaryQty
+					st = onHand
+				}
+			}
+
+			totalOnHand = totalOnHand.Add(onHand)
+			totalReserved = totalReserved.Add(reserved)
+			totalAvailable = totalAvailable.Add(available)
+
+			byWh = append(byWh, VariantWarehouseStockDTO{
+				WarehouseID:   wh.ID,
+				WarehouseName: wh.Name,
+				Stock:         st,
+				OnHand:        onHand,
+				Reserved:      reserved,
+				Locked:        locked,
+				InTransit:     inTransit,
+				Available:     available,
+				SecondaryQty:  secQty,
+			})
+		}
+
+		report = append(report, VariantStockReportDTO{
+			VariantID:      v.ID,
+			ProductID:      v.ProductID,
+			ProductName:    pName,
+			VariantName:    v.VariantName,
+			SKU:            v.Sku,
+			BaseUom:        baseUom,
+			TotalStock:     v.CurrentStock,
+			TotalOnHand:    totalOnHand,
+			TotalReserved:  totalReserved,
+			TotalAvailable: totalAvailable,
+			ByWarehouse:    byWh,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, report)
+}
+
+type TransferItemDTO struct {
+	VariantID string          `json:"variant_id"`
+	BatchID   *string         `json:"batch_id"`
+	Qty       decimal.Decimal `json:"qty"`
+	Uom       string          `json:"uom"`
+}
+
+type CreateTransferDTO struct {
+	FromWarehouseID string            `json:"from_warehouse_id"`
+	ToWarehouseID   string            `json:"to_warehouse_id"`
+	Notes           string            `json:"notes"`
+	Items           []TransferItemDTO `json:"items"`
+}
+
+func (s *Server) handleGetTransfers(w http.ResponseWriter, r *http.Request) {
+	var transfers []model.StockTransfer
+	if err := s.db.Preload("FromWarehouse").
+		Preload("ToWarehouse").
+		Preload("Items.Variant.Product").
+		Preload("Items.Batch").
+		Order("created_at desc").
+		Find(&transfers).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if transfers == nil {
+		transfers = []model.StockTransfer{}
+	}
+	writeJSON(w, http.StatusOK, transfers)
+}
+
+func (s *Server) handleCreateTransfer(w http.ResponseWriter, r *http.Request) {
+	var input CreateTransferDTO
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if input.FromWarehouseID == "" || input.ToWarehouseID == "" {
+		writeError(w, http.StatusBadRequest, "from_warehouse_id and to_warehouse_id are required")
+		return
+	}
+	if input.FromWarehouseID == input.ToWarehouseID {
+		writeError(w, http.StatusBadRequest, "không thể chuyển kho đến cùng một kho")
+		return
+	}
+	if len(input.Items) == 0 {
+		writeError(w, http.StatusBadRequest, "items cannot be empty")
+		return
+	}
+
+	transferID := uuid.New().String()
+	transferNumber := fmt.Sprintf("TRF-%s-%04d", time.Now().Format("060102"), time.Now().Unix()%10000)
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		transfer := model.StockTransfer{
+			ID:              transferID,
+			TransferNumber:  transferNumber,
+			FromWarehouseID: input.FromWarehouseID,
+			ToWarehouseID:   input.ToWarehouseID,
+			Status:          model.StockTransferStatusCompleted,
+			Notes:           input.Notes,
+		}
+
+		for _, item := range input.Items {
+			if item.Qty.LessThanOrEqual(decimal.Zero) {
+				return errors.New("transfer quantity must be positive")
+			}
+
+			var variant model.ProductVariant
+			if err := tx.Preload("Product").First(&variant, "id = ?", item.VariantID).Error; err != nil {
+				return err
+			}
+
+			uom := item.Uom
+			if uom == "" && variant.Product != nil {
+				uom = variant.Product.BaseUom
+			}
+
+			transfer.Items = append(transfer.Items, model.StockTransferItem{
+				ID:         uuid.New().String(),
+				TransferID: transferID,
+				VariantID:  item.VariantID,
+				BatchID:    item.BatchID,
+				Qty:        item.Qty,
+				Uom:        uom,
+			})
+
+			outNote := fmt.Sprintf("Chuyển kho đi (%s)", transferNumber)
+			if _, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
+				VariantID:      item.VariantID,
+				WarehouseID:    &input.FromWarehouseID,
+				BatchID:        item.BatchID,
+				MovementType:   model.MovementTypeTransferOut,
+				QtyInBaseUom:   item.Qty.Neg(),
+				InputUOM:       uom,
+				InputQty:       item.Qty.Neg(),
+				UnitCostAtTime: variant.CostPrice,
+				ReferenceID:    &transferNumber,
+				ReasonNote:     &outNote,
+			}); err != nil {
+				return err
+			}
+
+			inNote := fmt.Sprintf("Nhận chuyển kho (%s)", transferNumber)
+			if _, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
+				VariantID:      item.VariantID,
+				WarehouseID:    &input.ToWarehouseID,
+				BatchID:        item.BatchID,
+				MovementType:   model.MovementTypeTransferIn,
+				QtyInBaseUom:   item.Qty,
+				InputUOM:       uom,
+				InputQty:       item.Qty,
+				UnitCostAtTime: variant.CostPrice,
+				ReferenceID:    &transferNumber,
+				ReasonNote:     &inNote,
+			}); err != nil {
+				return err
+			}
+		}
+
+		return tx.Create(&transfer).Error
+	})
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var created model.StockTransfer
+	_ = s.db.Preload("FromWarehouse").Preload("ToWarehouse").Preload("Items.Variant.Product").First(&created, "id = ?", transferID)
+	writeJSON(w, http.StatusCreated, created)
+}
+
+type CompleteTransferRequest struct {
+	ReceivedQtys map[string]decimal.Decimal `json:"received_qtys,omitempty"`
+}
+
+func (s *Server) handleDispatchTransfer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.ledgerService.DispatchStockTransfer(r.Context(), nil, id); err != nil {
+		if errors.Is(err, service.ErrTransferNotFound) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrInsufficientStock) {
+			writeError(w, http.StatusBadRequest, "không đủ tồn kho để xuất chuyển")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var transfer model.StockTransfer
+	_ = s.db.Preload("FromWarehouse").Preload("ToWarehouse").Preload("Items.Variant.Product").First(&transfer, "id = ?", id)
+	writeJSON(w, http.StatusOK, transfer)
+}
+
+func (s *Server) handleCompleteTransfer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req CompleteTransferRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	var transfer model.StockTransfer
+	if err := s.db.First(&transfer, "id = ?", id).Error; err != nil {
+		writeError(w, http.StatusNotFound, "transfer not found")
+		return
+	}
+
+	if transfer.Status == model.StockTransferStatusInTransit {
+		if err := s.ledgerService.ReceiveStockTransfer(r.Context(), nil, id, req.ReceivedQtys); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else if transfer.Status == model.StockTransferStatusDraft {
+		if err := s.ledgerService.DispatchStockTransfer(r.Context(), nil, id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := s.ledgerService.ReceiveStockTransfer(r.Context(), nil, id, req.ReceivedQtys); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else {
+		transfer.Status = model.StockTransferStatusCompleted
+		_ = s.db.Save(&transfer)
+	}
+
+	_ = s.db.Preload("FromWarehouse").Preload("ToWarehouse").Preload("Items.Variant.Product").First(&transfer, "id = ?", id)
+	writeJSON(w, http.StatusOK, transfer)
 }
 
 // ----------------------------------------------------------------------------
@@ -1143,6 +1730,7 @@ type PurchaseItemDTO struct {
 
 type PurchaseDTO struct {
 	SupplierID    *string           `json:"supplier_id"`
+	WarehouseID   *string           `json:"warehouse_id,omitempty"`
 	ReferenceID   *string           `json:"reference_id"`
 	Notes         *string           `json:"notes"`
 	PaymentMethod *string           `json:"payment_method,omitempty"`
@@ -1198,6 +1786,7 @@ func (s *Server) handlePurchaseReceiving(w http.ResponseWriter, r *http.Request)
 			if _, err := s.ledgerService.CalculateNewWAC(r.Context(), tx, item.VariantID, qtyInBase, unitCostInBase); err != nil {
 				return err
 			}
+			_ = s.bomService.SyncBOMCostsForComponent(r.Context(), tx, item.VariantID)
 
 			var batchID *string
 			if item.BatchCode != nil && *item.BatchCode != "" {
@@ -1217,6 +1806,7 @@ func (s *Server) handlePurchaseReceiving(w http.ResponseWriter, r *http.Request)
 					batch := model.InventoryBatch{
 						ID:           uuid.New().String(),
 						VariantID:    item.VariantID,
+						WarehouseID:  input.WarehouseID,
 						BatchCode:    *item.BatchCode,
 						SupplierID:   input.SupplierID,
 						ReceivedDate: time.Now(),
@@ -1237,6 +1827,7 @@ func (s *Server) handlePurchaseReceiving(w http.ResponseWriter, r *http.Request)
 
 			if _, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
 				VariantID:      item.VariantID,
+				WarehouseID:    input.WarehouseID,
 				BatchID:        batchID,
 				MovementType:   model.MovementTypePurchaseIn,
 				QtyInBaseUom:   qtyInBase,
@@ -1317,6 +1908,7 @@ func (s *Server) handlePurchaseReceiving(w http.ResponseWriter, r *http.Request)
 
 type WastageDTO struct {
 	VariantID        string          `json:"variant_id"`
+	WarehouseID      *string         `json:"warehouse_id,omitempty"`
 	BatchID          *string         `json:"batch_id"`
 	LostQty          decimal.Decimal `json:"lost_qty"`
 	InputUOM         string          `json:"input_uom"`
@@ -1334,6 +1926,7 @@ func (s *Server) handleWastage(w http.ResponseWriter, r *http.Request) {
 
 	mov, cashTx, err := s.bomService.RecordWastage(r.Context(), nil, service.WastageParams{
 		VariantID:        input.VariantID,
+		WarehouseID:      input.WarehouseID,
 		BatchID:          input.BatchID,
 		LostQty:          input.LostQty,
 		InputUOM:         input.InputUOM,
@@ -1361,6 +1954,14 @@ func (s *Server) handleGetBomRecipes(w http.ResponseWriter, r *http.Request) {
 	if err := s.db.Preload("Items.ComponentVariant").Preload("TargetVariant").Find(&recipes).Error; err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	for i := range recipes {
+		if recipes[i].RecipeType == model.RecipeTypeAssembly {
+			cost, err := s.bomService.CalculateRecipeCost(r.Context(), s.db, recipes[i].ID)
+			if err == nil {
+				recipes[i].EstimatedUnitCost = cost
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, recipes)
 }
@@ -1409,12 +2010,57 @@ func (s *Server) handleCreateBomRecipe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-calculate BOM unit cost and update target variant's cost_price
+	if recipe.RecipeType == model.RecipeTypeAssembly {
+		_, _ = s.bomService.SyncVariantCostFromBOM(r.Context(), s.db, recipe.TargetVariantID)
+
+		// Set product production mode to POS_BACKFLUSH if currently NONE or empty
+		var targetVar model.ProductVariant
+		if err := s.db.First(&targetVar, "id = ?", recipe.TargetVariantID).Error; err == nil {
+			s.db.Model(&model.Product{}).
+				Where("id = ? AND (production_mode = ? OR production_mode = '')", targetVar.ProductID, model.ProductionModeNone).
+				Update("production_mode", model.ProductionModePosBackflush)
+		}
+	}
+
 	var created model.BomRecipe
 	if err := s.db.Preload("Items.ComponentVariant").Preload("TargetVariant").First(&created, "id = ?", recipe.ID).Error; err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if created.RecipeType == model.RecipeTypeAssembly {
+		cost, err := s.bomService.CalculateRecipeCost(r.Context(), s.db, created.ID)
+		if err == nil {
+			created.EstimatedUnitCost = cost
+		}
+	}
 	writeJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) handleSyncBomRecipeCost(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+
+	var recipe model.BomRecipe
+	if err := s.db.First(&recipe, "id = ?", id).Error; err != nil {
+		writeError(w, http.StatusNotFound, "recipe not found")
+		return
+	}
+
+	unitCost, err := s.bomService.SyncVariantCostFromBOM(r.Context(), s.db, recipe.TargetVariantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"recipe_id":           recipe.ID,
+		"target_variant_id":   recipe.TargetVariantID,
+		"estimated_unit_cost": unitCost,
+	})
 }
 
 type AssemblyDTO struct {
@@ -1526,6 +2172,7 @@ type PosCheckoutItemRequest struct {
 type PosCheckoutRequest struct {
 	PosSessionID    *string                  `json:"pos_session_id"`
 	CustomerID      *string                  `json:"customer_id"`
+	WarehouseID     *string                  `json:"warehouse_id,omitempty"`
 	Items           []PosCheckoutItemRequest `json:"items"`
 	Subtotal        decimal.Decimal          `json:"subtotal"`
 	DiscountAmount  decimal.Decimal          `json:"discount_amount"`
@@ -1641,25 +2288,44 @@ func (s *Server) handlePosCheckout(w http.ResponseWriter, r *http.Request) {
 			modJSONStr = itemReq.ModifiersJSON
 		}
 
+		var bomCost decimal.Decimal
+		var hasBomRecipe bool
+		calcCost, recipe, _ := s.bomService.CalculateVariantBOMCost(r.Context(), tx, variant.ID)
+		if recipe != nil {
+			hasBomRecipe = true
+			bomCost = calcCost
+		}
+
+		effectiveCost := variant.CostPrice
+		if effectiveCost.IsZero() && bomCost.IsPositive() {
+			effectiveCost = bomCost
+			_ = tx.Model(&model.ProductVariant{}).Where("id = ?", variant.ID).Update("cost_price", bomCost).Error
+		}
+
+		isBackflush := hasBomRecipe || (variant.Product != nil && variant.Product.ProductionMode == model.ProductionModePosBackflush)
+
 		if itemReq.IsReturn {
 			reason := fmt.Sprintf("POS return: %s", orderNumber)
-			_, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
-				VariantID:      variant.ID,
-				BatchID:        itemReq.BatchID,
-				MovementType:   model.MovementTypeReturnIn,
-				QtyInBaseUom:   actualBaseQty,
-				InputUOM:       soldUom,
-				InputQty:       soldQty,
-				UnitCostAtTime: variant.CostPrice,
-				ReferenceID:    &orderID,
-				ReasonNote:     &reason,
-			})
-			if err != nil {
-				tx.Rollback()
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
+			if variant.Product == nil || variant.Product.TrackInventory {
+				_, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
+					VariantID:      variant.ID,
+					WarehouseID:    req.WarehouseID,
+					BatchID:        itemReq.BatchID,
+					MovementType:   model.MovementTypeReturnIn,
+					QtyInBaseUom:   actualBaseQty,
+					InputUOM:       soldUom,
+					InputQty:       soldQty,
+					UnitCostAtTime: effectiveCost,
+					ReferenceID:    &orderID,
+					ReasonNote:     &reason,
+				})
+				if err != nil {
+					tx.Rollback()
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
 			}
-			lineCogs = actualBaseQty.Mul(variant.CostPrice).Neg()
+			lineCogs = actualBaseQty.Mul(effectiveCost).Neg()
 		} else {
 			reason := fmt.Sprintf("POS sale: %s", orderNumber)
 			batchIDToUse := itemReq.BatchID
@@ -1670,29 +2336,34 @@ func (s *Server) handlePosCheckout(w http.ResponseWriter, r *http.Request) {
 					batchIDToUse = &oldestBatch.ID
 				}
 			}
-			_, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
-				VariantID:      variant.ID,
-				BatchID:        batchIDToUse,
-				MovementType:   model.MovementTypeSaleOut,
-				QtyInBaseUom:   actualBaseQty.Neg(),
-				InputUOM:       soldUom,
-				InputQty:       soldQty,
-				UnitCostAtTime: variant.CostPrice,
-				ReferenceID:    &orderID,
-				ReasonNote:     &reason,
-			})
-			if err != nil {
-				tx.Rollback()
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
+			if variant.Product == nil || variant.Product.TrackInventory {
+				_, err := s.ledgerService.RecordMovement(r.Context(), tx, service.RecordMovementParams{
+					VariantID:      variant.ID,
+					WarehouseID:    req.WarehouseID,
+					BatchID:        batchIDToUse,
+					MovementType:   model.MovementTypeSaleOut,
+					QtyInBaseUom:   actualBaseQty.Neg(),
+					InputUOM:       soldUom,
+					InputQty:       soldQty,
+					UnitCostAtTime: effectiveCost,
+					ReferenceID:    &orderID,
+					ReasonNote:     &reason,
+				})
+				if err != nil {
+					tx.Rollback()
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
 			}
-			lineCogs = actualBaseQty.Mul(variant.CostPrice)
+			lineCogs = actualBaseQty.Mul(effectiveCost)
 
-			if variant.Product != nil && variant.Product.ProductionMode == model.ProductionModePosBackflush {
+			if isBackflush {
 				_, err := s.bomService.ExecuteBackflushDeduction(r.Context(), tx, service.BackflushParams{
+					WarehouseID: req.WarehouseID,
 					Items: []service.BackflushItem{
 						{
 							VariantID:     variant.ID,
+							WarehouseID:   req.WarehouseID,
 							Qty:           soldQty,
 							ModifiersJSON: "",
 							ReferenceID:   &orderID,
@@ -1798,6 +2469,7 @@ func (s *Server) handlePosCheckout(w http.ResponseWriter, r *http.Request) {
 		ID:              orderID,
 		OrderNumber:     orderNumber,
 		CustomerID:      req.CustomerID,
+		WarehouseID:     req.WarehouseID,
 		PosSessionID:    req.PosSessionID,
 		Status:          model.OrderStatusCompleted,
 		Subtotal:        subtotal,

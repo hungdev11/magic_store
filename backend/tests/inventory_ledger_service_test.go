@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/shopspring/decimal"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	"magic_store/backend/internal/model"
@@ -20,6 +20,11 @@ func setupLedgerTestDB(t *testing.T) *gorm.DB {
 	}
 
 	err = db.AutoMigrate(
+		&model.Warehouse{},
+		&model.WarehouseStock{},
+		&model.WarehouseStockBalance{},
+		&model.StockTransfer{},
+		&model.StockTransferItem{},
 		&model.Category{},
 		&model.Product{},
 		&model.ProductVariant{},
@@ -453,4 +458,384 @@ func TestCalculateNewWAC(t *testing.T) {
 
 func TestStateTransform_LiveToDeadFish(t *testing.T) {
 	TestInventoryLedgerService_StateTransform_LiveToDeadFish(t)
+}
+
+func TestInventoryLedgerService_DeductStockAtomic_AndCatchWeightAutoZeroing(t *testing.T) {
+	db := setupLedgerTestDB(t)
+	ledgerSvc := service.NewInventoryLedgerService(db)
+	ctx := context.Background()
+
+	wh := &model.Warehouse{
+		ID:                 "wh_pos",
+		Code:               "WH_POS",
+		Name:               "Quầy Bán Lẻ Chợ",
+		Type:               model.WarehouseTypeRetailPos,
+		AllowNegativeStock: false,
+		IsActive:           true,
+	}
+	db.Create(wh)
+
+	cat := &model.Category{ID: "cat_fresh", Name: "Hải sản tươi", Code: "CAT_FRESH"}
+	db.Create(cat)
+
+	prod := &model.Product{
+		ID:          "p_chem",
+		Name:        "Cá Chẽm Bơi",
+		Code:        "P_CHEM",
+		CategoryID:  cat.ID,
+		ProductType: model.ProductTypeRawMaterial,
+		BaseUom:     "kg",
+		IsWeighable: true,
+	}
+	db.Create(prod)
+
+	variant := &model.ProductVariant{
+		ID:           "v_chem_1",
+		ProductID:    prod.ID,
+		Sku:          "SKU-CHEM-LIVE",
+		VariantName:  "Cá Chẽm Sống Nguyên Con",
+		CurrentStock: decimal.NewFromFloat(30.0),
+		CostPrice:    decimal.NewFromInt(120000),
+	}
+	db.Create(variant)
+
+	sec20 := decimal.NewFromInt(20)
+	balance := &model.WarehouseStockBalance{
+		ID:                 "bal_chem_1",
+		WarehouseID:        wh.ID,
+		VariantID:          variant.ID,
+		OnHandBaseQty:      decimal.NewFromFloat(30.0), // 30.0 kg
+		ReservedBaseQty:    decimal.NewFromFloat(5.0),  // 5.0 kg đã giữ chỗ cho đơn Zalo
+		LockedBaseQty:      decimal.Zero,
+		InTransitBaseQty:   decimal.Zero,
+		OnHandSecondaryQty: &sec20, // 20 Con
+		WarehouseWacCost:   decimal.NewFromInt(120000),
+		Version:            1,
+	}
+	db.Create(balance)
+
+	// Available = 30.0 - 5.0 = 25.0 kg.
+	// 1. Thử bán vượt quá tồn khả dụng (26.0 kg) -> phải báo ErrInsufficientStock
+	_, err := ledgerSvc.DeductStockAtomic(ctx, nil, service.DeductStockParams{
+		WarehouseID:    wh.ID,
+		VariantID:      variant.ID,
+		QtyInBaseUom:   decimal.NewFromFloat(26.0),
+		UnitCostAtTime: variant.CostPrice,
+	})
+	if err != service.ErrInsufficientStock {
+		t.Fatalf("expected ErrInsufficientStock when available is 25kg and requesting 26kg, got: %v", err)
+	}
+
+	// 2. Bán thành công 3 con cá (nặng 4.5 kg)
+	sec3 := decimal.NewFromInt(3)
+	mov, err := ledgerSvc.DeductStockAtomic(ctx, nil, service.DeductStockParams{
+		WarehouseID:    wh.ID,
+		VariantID:      variant.ID,
+		QtyInBaseUom:   decimal.NewFromFloat(4.5),
+		SecondaryQty:   &sec3,
+		UnitCostAtTime: variant.CostPrice,
+		SoldUom:        "kg",
+		SoldQty:        decimal.NewFromFloat(4.5),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error on valid deduction: %v", err)
+	}
+	if mov.MovementType != model.MovementTypeSaleOut {
+		t.Fatalf("expected SALE_OUT movement type, got: %v", mov.MovementType)
+	}
+
+	var freshWSB model.WarehouseStockBalance
+	db.First(&freshWSB, "id = ?", balance.ID)
+	expectedOnHand := decimal.NewFromFloat(25.5) // 30.0 - 4.5
+	if !freshWSB.OnHandBaseQty.Equal(expectedOnHand) {
+		t.Fatalf("expected on_hand %v, got %v", expectedOnHand, freshWSB.OnHandBaseQty)
+	}
+	expectedSec := decimal.NewFromInt(17) // 20 - 3
+	if freshWSB.OnHandSecondaryQty == nil || !freshWSB.OnHandSecondaryQty.Equal(expectedSec) {
+		t.Fatalf("expected secondary %v, got %v", expectedSec, freshWSB.OnHandSecondaryQty)
+	}
+
+	// 3. Khách Zalo hủy đơn -> giải phóng 5.0kg giữ chỗ
+	err = ledgerSvc.CancelStockReservation(ctx, nil, service.CancelReservationParams{
+		WarehouseID:      wh.ID,
+		VariantID:        variant.ID,
+		EstimatedBaseQty: decimal.NewFromFloat(5.0),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error cancelling reservation: %v", err)
+	}
+
+	// 4. Catch-Weight Auto-Zeroing:
+	// Bán nốt 17 con còn lại, nhưng cân thực tế hao hụt chỉ ra 25.0 kg (còn dư 0.5 kg trên sổ sách do bốc hơi)
+	sec17 := decimal.NewFromInt(17)
+	_, err = ledgerSvc.DeductStockAtomic(ctx, nil, service.DeductStockParams{
+		WarehouseID:    wh.ID,
+		VariantID:      variant.ID,
+		QtyInBaseUom:   decimal.NewFromFloat(25.0),
+		SecondaryQty:   &sec17,
+		UnitCostAtTime: variant.CostPrice,
+		SoldUom:        "kg",
+		SoldQty:        decimal.NewFromFloat(25.0),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error selling last batch of fish: %v", err)
+	}
+
+	// Sau khi bán hết 17 con cuối cùng (secondary = 0), Auto-Zeroing phải tự động đưa on_hand_base_qty về đúng 0!
+	db.First(&freshWSB, "id = ?", balance.ID)
+	if !freshWSB.OnHandBaseQty.IsZero() {
+		t.Fatalf("expected on_hand to be auto-zeroed to 0, got %v", freshWSB.OnHandBaseQty)
+	}
+
+	// Kiểm tra đã sinh bút toán NATURAL_SHRINKAGE cho lượng 0.5kg
+	var shrinkageMov model.InventoryMovement
+	if err := db.Where("movement_type = ?", model.MovementTypeNaturalShrinkage).First(&shrinkageMov).Error; err != nil {
+		t.Fatalf("expected NATURAL_SHRINKAGE ledger movement to be recorded: %v", err)
+	}
+	if !shrinkageMov.QtyInBaseUom.Equal(decimal.NewFromFloat(-0.5)) {
+		t.Fatalf("expected shrinkage qty -0.5, got %v", shrinkageMov.QtyInBaseUom)
+	}
+}
+
+func TestInventoryLedgerService_TwoPhaseMultiOrderReservation(t *testing.T) {
+	db := setupLedgerTestDB(t)
+	ledgerSvc := service.NewInventoryLedgerService(db)
+	ctx := context.Background()
+
+	wh := &model.Warehouse{
+		ID:                 "wh_kitchen",
+		Code:               "WH_KITCHEN",
+		Name:               "Kho Bếp Tổng",
+		Type:               model.WarehouseTypeKitchenWip,
+		AllowNegativeStock: false,
+		IsActive:           true,
+	}
+	db.Create(wh)
+
+	cat := &model.Category{ID: "cat_dry", Name: "Khô & Đóng gói", Code: "CAT_DRY"}
+	db.Create(cat)
+
+	prod := &model.Product{
+		ID:          "p_meat",
+		Name:        "Thịt Bò Úc",
+		Code:        "P_MEAT",
+		CategoryID:  cat.ID,
+		ProductType: model.ProductTypeRawMaterial,
+		BaseUom:     "kg",
+		IsWeighable: true,
+	}
+	db.Create(prod)
+
+	variant := &model.ProductVariant{
+		ID:           "v_meat_1",
+		ProductID:    prod.ID,
+		Sku:          "SKU-BEEF",
+		VariantName:  "Bò Úc Nguyên Tảng",
+		CurrentStock: decimal.NewFromFloat(50.0),
+		CostPrice:    decimal.NewFromInt(250000),
+	}
+	db.Create(variant)
+
+	sec10 := decimal.NewFromInt(10)
+	balance := &model.WarehouseStockBalance{
+		ID:                 "bal_meat_1",
+		WarehouseID:        wh.ID,
+		VariantID:          variant.ID,
+		OnHandBaseQty:      decimal.NewFromFloat(50.0),
+		ReservedBaseQty:    decimal.Zero,
+		LockedBaseQty:      decimal.Zero,
+		OnHandSecondaryQty: &sec10, // 10 tảng
+		Version:            1,
+	}
+	db.Create(balance)
+
+	// Step 1: Đơn sỉ Zalo đặt trước 5 tảng bò (ước tính 25.0 kg) -> Reserve
+	sec5 := decimal.NewFromInt(5)
+	err := ledgerSvc.ReserveStock(ctx, nil, service.ReserveStockParams{
+		WarehouseID:        wh.ID,
+		VariantID:          variant.ID,
+		EstimatedBaseQty:   decimal.NewFromFloat(25.0),
+		EstimatedSecondary: &sec5,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error reserving stock: %v", err)
+	}
+
+	var freshWSB model.WarehouseStockBalance
+	db.First(&freshWSB, "id = ?", balance.ID)
+	// OnHand vẫn giữ nguyên 50.0 kg, Reserved tăng lên 25.0 kg
+	if !freshWSB.OnHandBaseQty.Equal(decimal.NewFromFloat(50.0)) {
+		t.Fatalf("expected OnHand to remain 50.0kg, got %v", freshWSB.OnHandBaseQty)
+	}
+	if !freshWSB.ReservedBaseQty.Equal(decimal.NewFromFloat(25.0)) {
+		t.Fatalf("expected Reserved to be 25.0kg, got %v", freshWSB.ReservedBaseQty)
+	}
+	// Available = 50 - 25 = 25 kg. Thử reserve 26 kg -> phải lỗi
+	err = ledgerSvc.ReserveStock(ctx, nil, service.ReserveStockParams{
+		WarehouseID:      wh.ID,
+		VariantID:        variant.ID,
+		EstimatedBaseQty: decimal.NewFromFloat(26.0),
+	})
+	if err != service.ErrInsufficientStock {
+		t.Fatalf("expected ErrInsufficientStock on oversell attempt, got %v", err)
+	}
+
+	// Step 2 & 3: Soạn cân thực tế (Over-delivery tolerance)
+	// Đặt ước tính 25.0 kg (5 tảng), nhưng cân thực tế ra 26.4 kg!
+	mov, err := ledgerSvc.CommitReservedFulfillment(ctx, nil, service.CommitFulfillmentParams{
+		WarehouseID:              wh.ID,
+		VariantID:                variant.ID,
+		EstimatedBaseQty:         decimal.NewFromFloat(25.0),
+		ActualFulfilledBaseQty:   decimal.NewFromFloat(26.4),
+		EstimatedSecondary:       &sec5,
+		ActualFulfilledSecondary: &sec5,
+		UnitCostAtTime:           variant.CostPrice,
+		SoldUom:                  "kg",
+		SoldQty:                  decimal.NewFromFloat(26.4),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error committing fulfillment: %v", err)
+	}
+	if !mov.QtyInBaseUom.Equal(decimal.NewFromFloat(-26.4)) {
+		t.Fatalf("expected SALE_OUT movement for actual 26.4kg, got %v", mov.QtyInBaseUom)
+	}
+
+	// Reserved giải phóng về 0, OnHand trừ đúng thực tế 26.4kg: 50.0 - 26.4 = 23.6 kg
+	db.First(&freshWSB, "id = ?", balance.ID)
+	if !freshWSB.ReservedBaseQty.IsZero() {
+		t.Fatalf("expected reserved to be released to 0, got %v", freshWSB.ReservedBaseQty)
+	}
+	expectedRemaining := decimal.NewFromFloat(23.6)
+	if !freshWSB.OnHandBaseQty.Equal(expectedRemaining) {
+		t.Fatalf("expected OnHand remaining %v, got %v", expectedRemaining, freshWSB.OnHandBaseQty)
+	}
+	// Số tảng còn lại: 10 - 5 = 5 tảng
+	if freshWSB.OnHandSecondaryQty == nil || !freshWSB.OnHandSecondaryQty.Equal(decimal.NewFromInt(5)) {
+		t.Fatalf("expected secondary remaining 5, got %v", freshWSB.OnHandSecondaryQty)
+	}
+}
+
+func TestInventoryLedgerService_TwoStepInterWarehouseTransferWithTransitWastage(t *testing.T) {
+	db := setupLedgerTestDB(t)
+	ledgerSvc := service.NewInventoryLedgerService(db)
+	ctx := context.Background()
+
+	whSender := &model.Warehouse{
+		ID:                 "wh_sender",
+		Code:               "WH_COLD_MAIN",
+		Name:               "Kho Đông Lạnh Tổng",
+		Type:               model.WarehouseTypeStorage,
+		AllowNegativeStock: false,
+		IsActive:           true,
+	}
+	whReceiver := &model.Warehouse{
+		ID:                 "wh_receiver",
+		Code:               "WH_MARKET",
+		Name:               "Sạp Bán Lẻ Chợ",
+		Type:               model.WarehouseTypeRetailPos,
+		AllowNegativeStock: false,
+		IsActive:           true,
+	}
+	db.Create(whSender)
+	db.Create(whReceiver)
+
+	cat := &model.Category{ID: "cat_seafood_trf", Name: "Hải sản", Code: "CAT_SEAFOOD_TRF"}
+	db.Create(cat)
+
+	prod := &model.Product{
+		ID:          "p_mackerel",
+		Name:        "Cá Thu",
+		Code:        "P_MACKEREL",
+		CategoryID:  cat.ID,
+		ProductType: model.ProductTypeRawMaterial,
+		BaseUom:     "kg",
+	}
+	db.Create(prod)
+
+	variant := &model.ProductVariant{
+		ID:           "v_mackerel",
+		ProductID:    prod.ID,
+		Sku:          "SKU-MACKEREL",
+		VariantName:  "Cá Thu Đông Lạnh",
+		CurrentStock: decimal.NewFromFloat(100.0),
+		CostPrice:    decimal.NewFromInt(150000),
+	}
+	db.Create(variant)
+
+	// Kho tổng có 100kg
+	balSender := &model.WarehouseStockBalance{
+		ID:            "bal_sender",
+		WarehouseID:   whSender.ID,
+		VariantID:     variant.ID,
+		OnHandBaseQty: decimal.NewFromFloat(100.0),
+		Version:       1,
+	}
+	db.Create(balSender)
+
+	transfer := &model.StockTransfer{
+		ID:              "trf_001",
+		TransferNumber:  "TRF-20261016-001",
+		FromWarehouseID: whSender.ID,
+		ToWarehouseID:   whReceiver.ID,
+		Status:          model.StockTransferStatusDraft,
+		Items: []model.StockTransferItem{
+			{
+				ID:         "item_trf_1",
+				TransferID: "trf_001",
+				VariantID:  variant.ID,
+				Qty:        decimal.NewFromFloat(50.0),
+				Uom:        "kg",
+			},
+		},
+	}
+	db.Create(transfer)
+
+	// BƯỚC 1: Xuất chuyển kho (DISPATCH)
+	err := ledgerSvc.DispatchStockTransfer(ctx, nil, transfer.ID)
+	if err != nil {
+		t.Fatalf("unexpected error dispatching transfer: %v", err)
+	}
+
+	// Kiểm tra trạng thái: Kho tổng giảm 50kg, Kho sạp chợ tăng in_transit 50kg
+	var freshSenderWSB model.WarehouseStockBalance
+	db.First(&freshSenderWSB, "id = ?", balSender.ID)
+	if !freshSenderWSB.OnHandBaseQty.Equal(decimal.NewFromFloat(50.0)) {
+		t.Fatalf("expected sender OnHand 50.0kg, got %v", freshSenderWSB.OnHandBaseQty)
+	}
+
+	var freshReceiverWSB model.WarehouseStockBalance
+	db.Where("warehouse_id = ? AND variant_id = ?", whReceiver.ID, variant.ID).First(&freshReceiverWSB)
+	if !freshReceiverWSB.InTransitBaseQty.Equal(decimal.NewFromFloat(50.0)) {
+		t.Fatalf("expected receiver InTransit 50.0kg, got %v", freshReceiverWSB.InTransitBaseQty)
+	}
+	if !freshReceiverWSB.OnHandBaseQty.IsZero() {
+		t.Fatalf("expected receiver OnHand to be 0 before receipt, got %v", freshReceiverWSB.OnHandBaseQty)
+	}
+
+	// BƯỚC 2: Nhận hàng (RECEIVE) có hao hụt (chỉ thực nhận 49.2 kg, hao 0.8 kg nước đá)
+	receivedQtys := map[string]decimal.Decimal{
+		"item_trf_1": decimal.NewFromFloat(49.2),
+	}
+	err = ledgerSvc.ReceiveStockTransfer(ctx, nil, transfer.ID, receivedQtys)
+	if err != nil {
+		t.Fatalf("unexpected error receiving transfer: %v", err)
+	}
+
+	// Kiểm tra sau khi nhận: in_transit = 0, OnHand = 49.2 kg
+	db.Where("warehouse_id = ? AND variant_id = ?", whReceiver.ID, variant.ID).First(&freshReceiverWSB)
+	if !freshReceiverWSB.InTransitBaseQty.IsZero() {
+		t.Fatalf("expected receiver InTransit to be 0 after receipt, got %v", freshReceiverWSB.InTransitBaseQty)
+	}
+	if !freshReceiverWSB.OnHandBaseQty.Equal(decimal.NewFromFloat(49.2)) {
+		t.Fatalf("expected receiver OnHand 49.2kg, got %v", freshReceiverWSB.OnHandBaseQty)
+	}
+
+	// Kiểm tra tự động ghi nhận sổ cái TRANSIT_WASTAGE cho lượng 0.8kg chênh lệch
+	var wastageMov model.InventoryMovement
+	if err := db.Where("movement_type = ?", model.MovementTypeTransitWastage).First(&wastageMov).Error; err != nil {
+		t.Fatalf("expected TRANSIT_WASTAGE ledger movement: %v", err)
+	}
+	if !wastageMov.QtyInBaseUom.Equal(decimal.NewFromFloat(-0.8)) {
+		t.Fatalf("expected wastage qty -0.8kg, got %v", wastageMov.QtyInBaseUom)
+	}
 }

@@ -13,6 +13,8 @@ type InventoryBatch struct {
 	ID           string              `gorm:"primaryKey;size:64" json:"id"`
 	VariantID    string              `gorm:"size:64;uniqueIndex:idx_variant_batch;index;not null" json:"variant_id"`
 	Variant      *ProductVariant     `gorm:"foreignKey:VariantID" json:"variant,omitempty"`
+	WarehouseID  *string             `gorm:"size:64;index" json:"warehouse_id,omitempty"`
+	Warehouse    *Warehouse          `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
 	BatchCode    string              `gorm:"uniqueIndex:idx_variant_batch;not null" json:"batch_code"`
 	SupplierID   *string             `gorm:"size:64;index" json:"supplier_id,omitempty"`
 	Supplier     *Partner            `gorm:"foreignKey:SupplierID" json:"supplier,omitempty"`
@@ -40,6 +42,8 @@ type InventoryMovement struct {
 	ID             string          `gorm:"primaryKey;size:64" json:"id"`
 	VariantID      string          `gorm:"size:64;index;not null" json:"variant_id"`
 	Variant        *ProductVariant `gorm:"foreignKey:VariantID" json:"variant,omitempty"`
+	WarehouseID    *string         `gorm:"size:64;index" json:"warehouse_id,omitempty"`
+	Warehouse      *Warehouse      `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
 	BatchID        *string         `gorm:"size:64;index" json:"batch_id,omitempty"`
 	Batch          *InventoryBatch `gorm:"foreignKey:BatchID" json:"batch,omitempty"`
 	MovementType   MovementType    `gorm:"size:50;index;not null" json:"movement_type"`

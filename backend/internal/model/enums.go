@@ -29,6 +29,27 @@ const (
 	ProductionModeDisassembly      ProductionMode = "DISASSEMBLY"
 )
 
+// ProductArchetype defines the business domain behavior of a product.
+type ProductArchetype string
+
+const (
+	ProductArchetypeStandard     ProductArchetype = "STANDARD"     // Đóng gói / Đa đơn vị tính (thùng, lon, hộp)
+	ProductArchetypeMatrix       ProductArchetype = "MATRIX"       // Thời trang / Biến thể (màu x size)
+	ProductArchetypeCatchWeight  ProductArchetype = "CATCH_WEIGHT"  // Tươi sống / Cân ký thực tế & HSD
+	ProductArchetypeManufactured ProductArchetype = "MANUFACTURED"  // Chế biến / Định mức BOM & Pha lóc
+	ProductArchetypeCombo        ProductArchetype = "COMBO"         // Combo / Gói nhiều mặt hàng
+)
+
+// WarehouseType classifies physical and logical storage locations.
+type WarehouseType string
+
+const (
+	WarehouseTypeStorage        WarehouseType = "STORAGE"
+	WarehouseTypeRetailPos      WarehouseType = "RETAIL_POS"
+	WarehouseTypeKitchenWip     WarehouseType = "KITCHEN_WIP"
+	WarehouseTypeVirtualTransit WarehouseType = "VIRTUAL_TRANSIT"
+)
+
 // MovementType classifies inventory ledger entries.
 type MovementType string
 
@@ -41,6 +62,31 @@ const (
 	MovementTypeStateTransform    MovementType = "STATE_TRANSFORM"
 	MovementTypeWastageSpoilage   MovementType = "WASTAGE_SPOILAGE"
 	MovementTypeStocktakeAdjust   MovementType = "STOCKTAKE_ADJUST"
+	MovementTypeTransferOut       MovementType = "TRANSFER_OUT"
+	MovementTypeTransferIn        MovementType = "TRANSFER_IN"
+	MovementTypeNaturalShrinkage  MovementType = "NATURAL_SHRINKAGE"
+	MovementTypeTransitWastage    MovementType = "TRANSIT_WASTAGE"
+)
+
+// FulfillmentStatus tracks 2-phase multi-channel order reservation lifecycle.
+type FulfillmentStatus string
+
+const (
+	FulfillmentStatusImmediateFulfilled FulfillmentStatus = "IMMEDIATE_FULFILLED"
+	FulfillmentStatusPendingReserved    FulfillmentStatus = "PENDING_RESERVED"
+	FulfillmentStatusPickedWeighed      FulfillmentStatus = "PICKED_WEIGHED"
+	FulfillmentStatusShipped            FulfillmentStatus = "SHIPPED"
+	FulfillmentStatusCancelled          FulfillmentStatus = "CANCELLED"
+)
+
+// StockTransferStatus tracks the lifecycle of an internal warehouse transfer.
+type StockTransferStatus string
+
+const (
+	StockTransferStatusDraft       StockTransferStatus = "DRAFT"
+	StockTransferStatusInTransit   StockTransferStatus = "IN_TRANSIT"
+	StockTransferStatusCompleted   StockTransferStatus = "COMPLETED"
+	StockTransferStatusCancelled   StockTransferStatus = "CANCELLED"
 )
 
 // RecipeType defines whether a BOM recipe is assembly or disassembly.

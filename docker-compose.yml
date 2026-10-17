@@ -1,10 +1,8 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
     container_name: magic_store_postgres
-    restart: always
+    restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
@@ -13,11 +11,74 @@ services:
       POSTGRES_DB: magic_store
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d magic_store"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: magic-store-backend:latest
+    container_name: magic_store_backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/magic_store?sslmode=disable
+      PORT: "8080"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: products
+      MINIO_PUBLIC_URL: http://localhost:9000
+      MINIO_USE_SSL: "false"
+    volumes:
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8080/api
+    image: magic-store-frontend:latest
+    container_name: magic_store_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      NEXT_PUBLIC_API_URL: http://localhost:8080/api
+    depends_on:
+      - backend
+
+  seed:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: magic-store-backend:latest
+    container_name: magic_store_seed
+    profiles:
+      - seed
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/magic_store?sslmode=disable
+    command: ["/app/seed"]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   minio:
     image: minio/minio:RELEASE.2024-11-07T00-52-20Z
     container_name: magic_store_minio
-    restart: always
+    profiles:
+      - storage
+    restart: unless-stopped
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -31,6 +92,8 @@ services:
   minio-init:
     image: minio/mc:RELEASE.2024-11-05T11-41-28Z
     container_name: magic_store_minio_init
+    profiles:
+      - storage
     depends_on:
       - minio
     entrypoint: >

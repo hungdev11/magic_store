@@ -42,11 +42,16 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     setError(null);
 
     try {
-      const presigned = await api.getPresignedUploadUrl(file.name, file.type);
-      await api.uploadToMinIO(presigned.upload_url, file);
-      onChange(presigned.file_url);
+      const uploaded = await api.uploadFile(file);
+      onChange(uploaded.file_url);
     } catch (err: any) {
-      setError(err?.message || "Lỗi tải ảnh lên");
+      try {
+        const presigned = await api.getPresignedUploadUrl(file.name, file.type);
+        await api.uploadToMinIO(presigned.upload_url, file);
+        onChange(presigned.file_url);
+      } catch (subErr: any) {
+        setError(err?.message || "Lỗi tải ảnh lên");
+      }
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

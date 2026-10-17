@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { ChevronDown, Search, Check } from "lucide-react";
+import { ChevronDown, Search, Check, Plus } from "lucide-react";
 
 export interface SelectOption {
   value: string;
@@ -18,6 +18,8 @@ export interface SearchableSelectProps {
   disabled?: boolean;
   className?: string;
   autoFocus?: boolean;
+  onCreate?: (searchQuery: string) => void;
+  createLabel?: string;
 }
 
 // ponytail: popover uses absolute position below trigger; upgrade to @floating-ui/react or Radix Popper when viewport-aware collision detection is needed.
@@ -29,6 +31,8 @@ export function SearchableSelect({
   disabled = false,
   className = "",
   autoFocus = false,
+  onCreate,
+  createLabel,
 }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -266,6 +270,25 @@ export function SearchableSelect({
                   </li>
                 );
               })
+            )}
+
+            {/* Quick Create Button inside Dropdown */}
+            {onCreate && (
+              <li className="p-1.5 border-t border-border-subtle bg-surface-app/50 sticky bottom-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onCreate(searchQuery.trim());
+                    handleClose();
+                  }}
+                  className="w-full py-1.5 px-2.5 text-xs font-semibold text-brand hover:text-brand-hover bg-surface-card hover:bg-surface-app border border-brand/20 hover:border-brand rounded flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5 text-brand" />
+                  <span>
+                    + {createLabel ? createLabel : searchQuery ? `Tạo mới "${searchQuery}"` : "Tạo mới"}
+                  </span>
+                </button>
+              </li>
             )}
           </ul>
         </div>

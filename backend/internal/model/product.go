@@ -37,11 +37,14 @@ type Product struct {
 	CategoryID      string                 `gorm:"size:64;index;not null" json:"category_id"`
 	Category        *Category              `gorm:"foreignKey:CategoryID" json:"category,omitempty"`
 	ProductType     ProductType            `gorm:"size:50;index;not null" json:"product_type"`
-	BaseUom         string                 `gorm:"not null" json:"base_uom"`
-	IsWeighable     bool                   `gorm:"default:false" json:"is_weighable"`
-	TrackInventory  bool                   `gorm:"default:true" json:"track_inventory"`
-	TrackBatches    bool                   `gorm:"default:false" json:"track_batches"`
-	ProductionMode  ProductionMode         `gorm:"size:50;default:'NONE'" json:"production_mode"`
+	Archetype       ProductArchetype       `gorm:"size:50;default:'STANDARD'" json:"archetype"`
+	BaseUom           string                 `gorm:"not null" json:"base_uom"`
+	IsWeighable       bool                   `gorm:"default:false" json:"is_weighable"`
+	TrackInventory    bool                   `gorm:"default:true" json:"track_inventory"`
+	TrackBatches      bool                   `gorm:"default:false" json:"track_batches"`
+	ShelfLifeDays     *int                   `json:"shelf_life_days,omitempty"`
+	ExpiryWarningDays *int                   `json:"expiry_warning_days,omitempty"`
+	ProductionMode    ProductionMode         `gorm:"size:50;default:'NONE'" json:"production_mode"`
 	ImageURL        string                 `gorm:"size:512" json:"image_url,omitempty"`
 	Images          string                 `gorm:"type:text;default:'[]'" json:"images,omitempty"`
 	Variants        []ProductVariant       `gorm:"foreignKey:ProductID;constraint:OnDelete:CASCADE" json:"variants,omitempty"`
@@ -67,6 +70,8 @@ type ProductVariant struct {
 	VariantName        string              `gorm:"not null" json:"variant_name"`
 	Attributes         string              `gorm:"type:text;default:'{}'" json:"attributes"`
 	ImageURL           string              `gorm:"size:512" json:"image_url,omitempty"`
+	ShelfLifeDays      *int                `json:"shelf_life_days,omitempty"`
+	ExpiryWarningDays  *int                `json:"expiry_warning_days,omitempty"`
 	CostPrice          decimal.Decimal     `gorm:"type:decimal(15,2);default:0" json:"cost_price"`
 	BaseSellingPrice   decimal.Decimal     `gorm:"type:decimal(15,2);default:0" json:"base_selling_price"`
 	MinSellingPrice    decimal.Decimal     `gorm:"type:decimal(15,2);default:0" json:"min_selling_price"`
@@ -99,6 +104,8 @@ type UomConversion struct {
 	ConversionFactor   decimal.Decimal  `gorm:"type:decimal(12,4);not null" json:"conversion_factor"`
 	IsVariableRatio    bool             `gorm:"default:false" json:"is_variable_ratio"`
 	DefaultPriceForUom *decimal.Decimal `gorm:"type:decimal(15,2)" json:"default_price_for_uom,omitempty"`
+	Barcode            *string          `gorm:"uniqueIndex" json:"barcode,omitempty"`
+	SellingPrice       *decimal.Decimal `gorm:"type:decimal(15,2)" json:"selling_price,omitempty"`
 	CreatedAt          time.Time        `json:"created_at"`
 	UpdatedAt          time.Time        `json:"updated_at"`
 }

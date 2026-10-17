@@ -19,6 +19,11 @@ import {
   Settings,
   Sparkles,
   Layers,
+  Warehouse,
+  ArrowRightLeft,
+  CreditCard,
+  Wallet,
+  TrendingUp,
 } from "lucide-react";
 
 interface NavItem {
@@ -45,16 +50,27 @@ const navGroups: NavGroup[] = [
   {
     title: "Kho & Vật tư",
     items: [
+      { name: "Tồn kho chi nhánh", href: "/inventory/stock", icon: Warehouse },
+      { name: "Chuyển kho", href: "/inventory/transfers", icon: ArrowRightLeft },
+      { name: "Danh mục kho", href: "/inventory/warehouses", icon: Warehouse },
       { name: "Quản lý Lô & HSD", href: "/inventory/batches", icon: Boxes },
       { name: "Nhập kho", href: "/inventory/purchase", icon: ArrowDownToLine },
       { name: "Xuất hủy", href: "/inventory/wastage", icon: Trash2 },
     ],
   },
   {
-    title: "Đối tác",
+    title: "Đối tác (CRM)",
     items: [
-      { name: "Nhà cung cấp", href: "/partners?type=SUPPLIER", icon: Truck },
-      { name: "Khách hàng", href: "/partners?type=CUSTOMER", icon: Users },
+      { name: "Khách hàng", href: "/customers", icon: Users },
+      { name: "Nhà cung cấp", href: "/suppliers", icon: Truck },
+    ],
+  },
+  {
+    title: "Tài chính & Sổ nợ",
+    items: [
+      { name: "Sổ nợ & Công nợ", href: "/finance/debts", icon: CreditCard },
+      { name: "Sổ quỹ Thu/Chi", href: "/finance/cashbook", icon: Wallet },
+      { name: "Báo cáo Lãi/Lỗ", href: "/finance/pnl", icon: TrendingUp },
     ],
   },
   {

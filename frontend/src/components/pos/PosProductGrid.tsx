@@ -12,7 +12,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { type Product, type ProductVariant, type Category } from "@/lib/api";
-import { formatVND, formatQty } from "@/lib/design-tokens";
+import { formatVND, formatQty, formatMultiUomStock } from "@/lib/design-tokens";
 import {
   parseAttributes,
   getVariantStock,
@@ -32,13 +32,19 @@ export interface PosProductGridProps {
   onSearchChange: (query: string) => void;
   onSearchSubmit: (e: React.FormEvent) => void;
   onProductClick: (product: Product) => void;
+  warehouseStockMap?: Map<string, number>;
   isLoading?: boolean;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
   className?: string;
 }
 
 function isBomProduct(p: Product): boolean {
-  return p.production_mode === "BOM" || Boolean(p.track_batches);
+  return (
+    p.production_mode === "POS_BACKFLUSH" ||
+    p.production_mode === "BATCH_MANUFACTURE" ||
+    p.production_mode === "BOM" ||
+    p.archetype === "MANUFACTURED"
+  );
 }
 
 // ponytail: responsive CSS grid 2-4 columns; upgrade to virtualized grid if product catalog exceeds 1000 items.
@@ -51,10 +57,33 @@ export const PosProductGrid: React.FC<PosProductGridProps> = ({
   onSearchChange,
   onSearchSubmit,
   onProductClick,
+  warehouseStockMap,
   isLoading = false,
   searchInputRef,
   className = "",
 }) => {
+  const displayedProducts = React.useMemo(() => {
+    return products.filter((p) => {
+      if (selectedCategoryId !== "ALL" && p.category_id !== selectedCategoryId) {
+        return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchName = p.name.toLowerCase().includes(q);
+        const matchCode = p.code.toLowerCase().includes(q);
+        const matchVariant = (p.variants || []).some(
+          (v) =>
+            v.sku.toLowerCase().includes(q) ||
+            (v.barcode && v.barcode.toLowerCase().includes(q)) ||
+            (v.variant_name && v.variant_name.toLowerCase().includes(q))
+        );
+        if (!matchName && !matchCode && !matchVariant) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [products, selectedCategoryId, searchQuery]);
   return (
     <section className={`flex flex-col h-full bg-surface-app select-none min-w-0 ${className}`}>
       {/* Top Bar: Search & Barcode Input and Categories */}
@@ -133,23 +162,41 @@ export const PosProductGrid: React.FC<PosProductGridProps> = ({
             <RefreshCw className="w-6 h-6 animate-spin text-brand" />
             <span className="text-xs font-medium">Đang tải danh mục hàng hóa...</span>
           </div>
-        ) : products.length === 0 ? (
+        ) : displayedProducts.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-text-sub gap-2 py-12">
             <Search className="w-8 h-8 stroke-1 text-text-disabled" />
             <span className="text-xs font-medium">Không tìm thấy sản phẩm phù hợp.</span>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
-            {products.map((product) => {
+            {displayedProducts.map((product) => {
               const weighable = isWeighableProduct(product);
               const matrix = isMatrixProduct(product);
               const modifier = isModifierProduct(product);
               const bom = isBomProduct(product);
-              const totalStock = getProductTotalStock(product);
+
+              const totalStock = (product.variants || []).reduce((sum, v) => {
+                if (warehouseStockMap && warehouseStockMap.has(v.id)) {
+                  return sum + (warehouseStockMap.get(v.id) ?? 0);
+                }
+                return sum + Number(v.current_stock || 0);
+              }, 0);
+
               const primaryVariant = product.variants?.[0];
               const price = primaryVariant
                 ? Number(primaryVariant.base_selling_price) || 0
                 : 0;
+
+              const conversions = primaryVariant?.uom_conversions || [];
+              const multiUom = formatMultiUomStock(totalStock, product.base_uom, conversions);
+              const stockLabel =
+                !product.track_inventory && bom
+                  ? "BOM tự động trừ"
+                  : totalStock <= 0
+                  ? "Hết hàng"
+                  : conversions.length > 0 && multiUom.parts.length > 1
+                  ? multiUom.breakdown
+                  : `Tồn: ${formatQty(totalStock, product.base_uom)}`;
 
               return (
                 <button
@@ -215,11 +262,16 @@ export const PosProductGrid: React.FC<PosProductGridProps> = ({
                       {formatVND(price)}
                     </span>
                     <span
-                      className={`text-[10px] font-mono tabular-nums font-medium ${
-                        totalStock <= 0 ? "text-outflow font-bold" : "text-text-sub"
+                      title={multiUom.fullText}
+                      className={`text-[10px] font-mono tabular-nums font-semibold truncate max-w-[60%] text-right ${
+                        !product.track_inventory && bom
+                          ? "text-indigo-700 bg-indigo-50 px-1 py-0.5 rounded border border-indigo-200"
+                          : totalStock <= 0
+                          ? "text-rose-600 bg-rose-50 px-1 py-0.2 rounded"
+                          : "text-text-sub"
                       }`}
                     >
-                      Tồn: {formatQty(totalStock, product.base_uom)}
+                      {stockLabel}
                     </span>
                   </div>
                 </button>

@@ -3,7 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "scripts": {},
+  "scripts": {
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:restart": "docker compose restart",
+    "docker:logs": "docker compose logs -f",
+    "docker:build": "docker compose build",
+    "docker:seed": "docker compose --profile seed run --rm seed"
+  },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },

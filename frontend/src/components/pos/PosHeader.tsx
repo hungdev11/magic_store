@@ -25,6 +25,7 @@ export interface PosHeaderProps {
   activeWarehouseId?: string;
   onSelectWarehouse?: (warehouseId: string) => void;
   shiftName?: string;
+  onSelectShift?: (shiftName: string) => void;
   cashierName?: string;
   isOnline?: boolean;
   offlineCount?: number;
@@ -40,7 +41,8 @@ export const PosHeader: React.FC<PosHeaderProps> = ({
   warehouses = [],
   activeWarehouseId,
   onSelectWarehouse,
-  shiftName = "Ca làm việc",
+  shiftName = "Ca 1 (Sáng)",
+  onSelectShift,
   cashierName = "Thu ngân",
   isOnline = true,
   offlineCount = 0,
@@ -112,14 +114,42 @@ export const PosHeader: React.FC<PosHeaderProps> = ({
             </Badge>
           </div>
 
-          {/* Warehouse & Shift Indicators */}
-          <div className="hidden lg:flex items-center gap-1.5 text-xs text-text-main bg-surface-app px-2.5 py-1 rounded-sm border border-border-default font-medium">
-            <Warehouse className="w-3.5 h-3.5 text-brand" />
-            <span>Kho chính</span>
+          {/* Warehouse Selector */}
+          {warehouses.length > 0 && (
+            <div className="flex items-center gap-1.5 text-xs text-text-main bg-surface-app px-2 py-1 rounded border border-border-default font-medium">
+              <Warehouse className="w-3.5 h-3.5 text-brand shrink-0" />
+              <select
+                value={activeWarehouseId}
+                onChange={(e) => onSelectWarehouse?.(e.target.value)}
+                className="bg-transparent text-text-main font-semibold text-xs focus:outline-none cursor-pointer max-w-[150px] truncate"
+                title="Chọn kho chi nhánh bán hàng"
+              >
+                {warehouses.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Shift Selector */}
+          <div className="hidden sm:flex items-center gap-1 text-xs bg-surface-app px-2 py-1 rounded border border-border-subtle">
+            <span className="text-[10px] text-text-sub uppercase font-bold">Ca:</span>
+            {onSelectShift ? (
+              <select
+                value={shiftName}
+                onChange={(e) => onSelectShift(e.target.value)}
+                className="bg-transparent text-text-main font-medium text-xs focus:outline-none cursor-pointer"
+              >
+                <option value="Ca 1 (Sáng)">Ca 1 (06:00 - 14:00)</option>
+                <option value="Ca 2 (Chiều)">Ca 2 (14:00 - 22:00)</option>
+                <option value="Ca 3 (Đêm)">Ca 3 (22:00 - 06:00)</option>
+              </select>
+            ) : (
+              <span className="font-semibold text-text-main">{shiftName}</span>
+            )}
           </div>
-          <Badge variant="default" className="hidden sm:inline-flex">
-            {shiftName}
-          </Badge>
         </div>
 
         {/* Center Section: Keyboard Shortcuts Quick Bar */}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { useStoreProfile } from "@/lib/store";
 import {
   PageHeader,
@@ -9,305 +9,119 @@ import {
   AlertBanner,
 } from "@/components/common";
 import {
-  Fish,
-  Shirt,
-  UtensilsCrossed,
+  Store,
+  Save,
+  CheckCircle2,
+  Sliders,
+  DollarSign,
+  Package,
   Layers,
   Scale,
   Factory,
-  CalendarClock,
-  Tag,
-  WalletCards,
-  Sparkles,
-  Check,
-  CheckCircle2,
-  AlertCircle,
-  Save,
-  Loader2,
-  Sliders,
-  Store,
-  RotateCcw,
+  Boxes,
+  CreditCard,
+  Building2,
+  Wallet,
 } from "lucide-react";
 
-// Preset definitions conforming to Phase 3 Adaptive UI spec
-const PRESETS = [
+const ACTIVE_SYSTEM_CAPABILITIES = [
   {
-    key: "SEAFOOD" as const,
-    title: "Sạp Cá & Hải Sản Tươi Sống",
-    subtitle: "Thủy hải sản & Cân ký",
-    description:
-      "Tối ưu cho kinh doanh thủy hải sản tươi sống: cân trọng lượng thực tế tại quầy, quản lý lô date và phân rã mổ xẻ cá hồi/thịt cá.",
-    icon: Fish,
-    badgeColor: "bg-cyan-50 text-cyan-700 border-cyan-200",
-    activeColor: "border-cyan-500 ring-2 ring-cyan-500/20",
-    iconBg: "bg-cyan-100 text-cyan-700",
-    modules: {
-      catch_weight: true,
-      batch_expiry: true,
-      bom_production: true,
-      dynamic_pos_pricing: true,
-      matrix_variants: false,
-      credit_ledger: false,
-      product_modifiers: false,
-    },
-    features: [
-      { key: "catch_weight", label: "Cân thực tế (Catch-weight)", state: true },
-      { key: "batch_expiry", label: "Quản lý Lô & Hạn sử dụng", state: true },
-      { key: "bom_production", label: "Mổ xẻ & Pha lóc (BOM)", state: true },
-      { key: "dynamic_pos_pricing", label: "Mặc cả & Sửa giá quầy", state: true },
-      { key: "matrix_variants", label: "Ma trận Màu x Size", state: false },
-    ],
+    title: "Phân hệ Đa Chi Nhánh & Đa Kho",
+    desc: "Cân bằng tồn kho, điều chuyển hàng hóa liên kho và hạch toán độc lập tại từng địa điểm.",
+    icon: Building2,
   },
   {
-    key: "APPAREL" as const,
-    title: "Shop Thời Trang & May Mặc",
-    subtitle: "Thời trang & Đa biến thể",
-    description:
-      "Tối ưu cho bán lẻ thời trang: ma trận đa biến thể Màu × Size, quản lý sổ nợ khách hàng quen và điều chỉnh giá bán linh hoạt.",
-    icon: Shirt,
-    badgeColor: "bg-purple-50 text-purple-700 border-purple-200",
-    activeColor: "border-purple-500 ring-2 ring-purple-500/20",
-    iconBg: "bg-purple-100 text-purple-700",
-    modules: {
-      matrix_variants: true,
-      credit_ledger: true,
-      dynamic_pos_pricing: true,
-      catch_weight: false,
-      bom_production: false,
-      batch_expiry: false,
-      product_modifiers: false,
-    },
-    features: [
-      { key: "matrix_variants", label: "Ma trận Biến thể (Màu × Size)", state: true },
-      { key: "credit_ledger", label: "Sổ nợ Khách & Nhà cung cấp", state: true },
-      { key: "dynamic_pos_pricing", label: "Mặc cả & Sửa giá quầy", state: true },
-      { key: "catch_weight", label: "Cân thực tế (Catch-weight)", state: false },
-      { key: "bom_production", label: "Định mức chế biến (BOM)", state: false },
-    ],
+    title: "Bản chất hàng hóa (Cách 2)",
+    desc: "Tự động tinh giản biểu mẫu theo đúng loại sản phẩm (Đa ĐVT, Ma trận Màu × Size, Cân ký tươi sống, F&B Chế biến).",
+    icon: Package,
   },
   {
-    key: "FOOD" as const,
-    title: "Tiệm Chế Biến Đồ Ăn & F&B",
-    subtitle: "F&B & Chế biến món",
-    description:
-      "Tối ưu cho nhà hàng, tiệm ăn uống: lập công thức chế biến mẻ thành phẩm theo BOM, quản lý đồ ăn kèm topping và theo dõi hạn sử dụng.",
-    icon: UtensilsCrossed,
-    badgeColor: "bg-orange-50 text-orange-700 border-orange-200",
-    activeColor: "border-orange-500 ring-2 ring-orange-500/20",
-    iconBg: "bg-orange-100 text-orange-700",
-    modules: {
-      bom_production: true,
-      batch_expiry: true,
-      product_modifiers: true,
-      dynamic_pos_pricing: true,
-      matrix_variants: false,
-      catch_weight: false,
-      credit_ledger: false,
-    },
-    features: [
-      { key: "bom_production", label: "Chế biến mẻ thành phẩm (BOM)", state: true },
-      { key: "batch_expiry", label: "Quản lý Lô & Hạn sử dụng", state: true },
-      { key: "product_modifiers", label: "Đồ ăn kèm / Topping", state: true },
-      { key: "matrix_variants", label: "Ma trận Màu x Size", state: false },
-      { key: "catch_weight", label: "Cân thực tế (Catch-weight)", state: false },
-    ],
-  },
-];
-
-// 7 Fine-grained feature flag switches
-const FEATURE_FLAGS = [
-  {
-    key: "matrix_variants",
-    title: "Ma trận Biến thể (Màu x Size)",
-    description:
-      "Quản lý sản phẩm thời trang đa thuộc tính (Màu sắc × Kích cỡ), tự động sinh danh sách SKU biến thể theo lưới quy cách.",
-    icon: Layers,
-    accentColor: "text-purple-600 bg-purple-50 border-purple-200",
-  },
-  {
-    key: "catch_weight",
-    title: "Cân số thực & Đơn vị biến thiên (Dual-unit)",
-    description:
-      "Nhập số cân thực tế khi bán hoặc nhập kho (VD: Con ~ 1.2kg). Quản lý tồn kho kép theo đơn vị chuẩn và đơn vị phụ.",
+    title: "Đa Đơn Vị Tính & Barcode riêng",
+    desc: "Mỗi quy cách (Thùng, Lốc, Lon) có hệ số quy đổi, mã vạch và giá bán riêng để quét tại quầy.",
     icon: Scale,
-    accentColor: "text-cyan-600 bg-cyan-50 border-cyan-200",
   },
   {
-    key: "bom_production",
-    title: "Chế biến mẻ & Phân rã mổ xẻ (BOM)",
-    description:
-      "Lập định mức nguyên liệu (Bill of Materials) để chế biến nấu mẻ thành phẩm hoặc pha lóc xẻ thịt cá, tự động trừ kho nguyên liệu.",
-    icon: Factory,
-    accentColor: "text-indigo-600 bg-indigo-50 border-indigo-200",
-  },
-  {
-    key: "batch_expiry",
     title: "Quản lý Lô & Hạn sử dụng",
-    description:
-      "Theo dõi số lô nhập kho, cảnh báo hàng sắp hết hạn, hỗ trợ quản lý hạn dùng sản phẩm tươi sống và thực phẩm.",
-    icon: CalendarClock,
-    accentColor: "text-amber-600 bg-amber-50 border-amber-200",
+    desc: "Theo dõi số lô nhập, tự động tính ngày hết hạn theo shelf life và cảnh báo cận date.",
+    icon: Boxes,
   },
   {
-    key: "dynamic_pos_pricing",
-    title: "Cho phép sửa giá / mặc cả tại quầy",
-    description:
-      "Cho phép thu ngân điều chỉnh giá bán trực tiếp trên đơn hàng POS hoặc áp dụng mức giá bán nhanh theo thời điểm.",
-    icon: Tag,
-    accentColor: "text-sky-600 bg-sky-50 border-sky-200",
+    title: "Sổ Nợ & Quản lý Công nợ (CRM)",
+    desc: "Phân tách rõ công nợ phải thu từ khách hàng và công nợ phải trả cho nhà cung cấp.",
+    icon: CreditCard,
   },
   {
-    key: "credit_ledger",
-    title: "Quản lý Sổ nợ Khách hàng & Nhà cung cấp",
-    description:
-      "Ghi nhận công nợ khi nhập hàng và cho phép khách hàng quen mua nợ ghi sổ, theo dõi số dư và hạn mức nợ.",
-    icon: WalletCards,
-    accentColor: "text-rose-600 bg-rose-50 border-rose-200",
+    title: "Sổ Quỹ Thu / Chi Thực Tế",
+    desc: "Theo dõi dòng tiền vào ra, phân biệt quỹ tiền mặt tại két và tài khoản ngân hàng.",
+    icon: Wallet,
   },
   {
-    key: "product_modifiers",
-    title: "Đồ ăn kèm / Topping có cấu hình",
-    description:
-      "Cấu hình danh sách gia vị, topping, đồ ăn kèm khi bán hàng F&B kèm theo phụ thu định lượng nguyên vật liệu.",
-    icon: Sparkles,
-    accentColor: "text-orange-600 bg-orange-50 border-orange-200",
+    title: "Báo Cáo Lãi / Lỗ Thực Tế (P&L)",
+    desc: "Bóc tách chính xác Doanh thu, Giá vốn WAC, Tổn thất xuất hủy và Chi phí vận hành.",
+    icon: DollarSign,
+  },
+  {
+    title: "Định mức BOM & F&B Options",
+    desc: "Sản xuất mẻ, bán hàng tự trừ nguyên vật liệu, cấu hình size giá và danh sách topping món kèm.",
+    icon: Factory,
   },
 ];
 
 export default function SettingsPage() {
-  const { storeSetting, enabledModules, updateSettings, applyPreset, fetchSettings } =
-    useStoreProfile();
+  const { storeSetting, updateSettings, fetchSettings } = useStoreProfile();
 
-  // Local form state
   const [storeName, setStoreName] = useState("");
+  const [currency, setCurrency] = useState("VND");
   const [costingMethod, setCostingMethod] = useState("WAC");
-  const [localModules, setLocalModules] = useState<Record<string, boolean>>({});
-
-  // UI state
   const [isSaving, setIsSaving] = useState(false);
-  const [applyingPreset, setApplyingPreset] = useState<string | null>(null);
   const [toast, setToast] = useState<{
-    type: "success" | "error" | "info";
+    type: "success" | "error";
     message: string;
   } | null>(null);
 
-  // Synchronize state from store profile
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings]);
 
   useEffect(() => {
     if (storeSetting) {
-      setStoreName(storeSetting.name || "Cửa Hàng");
+      setStoreName(storeSetting.name || "Cửa Hàng Magic Store");
+      setCurrency(storeSetting.currency || "VND");
       setCostingMethod(storeSetting.costing_method || "WAC");
     }
   }, [storeSetting]);
 
-  useEffect(() => {
-    setLocalModules(enabledModules);
-  }, [enabledModules]);
-
-  // Determine which preset matches current active modules
-  // ponytail: preset match checks key modules required by each profile
-  const activePresetKey = useMemo(() => {
-    for (const preset of PRESETS) {
-      const isMatch = Object.entries(preset.modules).every(([key, expected]) => {
-        return !!localModules[key] === expected;
-      });
-      if (isMatch) return preset.key;
-    }
-    return null;
-  }, [localModules]);
-
-  // Auto-dismiss toast
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(timer);
-  }, [toast]);
-
-  // Toggle single module flag
-  const handleToggleModule = (key: string) => {
-    setLocalModules((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
-  };
-
-  // 1-Click apply preset handler
-  const handleApplyPreset = async (presetKey: "SEAFOOD" | "APPAREL" | "FOOD") => {
-    setApplyingPreset(presetKey);
-    setToast(null);
-
-    const preset = PRESETS.find((p) => p.key === presetKey);
-    if (!preset) return;
-
-    try {
-      // 1. Call store applyPreset API
-      await applyPreset(presetKey);
-
-      // Update local state immediately
-      setLocalModules(preset.modules);
-      setToast({
-        type: "success",
-        message: `Đã áp dụng thành công mẫu: ${preset.title}! Hệ thống đã cập nhật tính năng.`,
-      });
-    } catch (err: any) {
-      // Even if network error occurs, apply locally for resilient UX
-      setLocalModules(preset.modules);
-      setToast({
-        type: "info",
-        message: `Đã áp dụng mẫu ${preset.title} vào giao diện hiện tại.`,
-      });
-    } finally {
-      setApplyingPreset(null);
-    }
-  };
-
-  // Save full settings form
-  const handleSaveSettings = async (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!storeName.trim()) {
+      setToast({ type: "error", message: "Tên cửa hàng không được để trống" });
+      return;
+    }
+
     setIsSaving(true);
     setToast(null);
-
     try {
       await updateSettings({
-        name: storeName.trim() || "Cửa Hàng",
+        name: storeName.trim(),
+        currency: currency.trim().toUpperCase(),
         costing_method: costingMethod,
-        enabled_modules: localModules,
       });
-      setToast({
-        type: "success",
-        message: "Lưu cấu hình cửa hàng & mô-đun nghiệp vụ thành công!",
-      });
+      setToast({ type: "success", message: "Đã lưu cài đặt cửa hàng thành công!" });
     } catch (err: any) {
-      setToast({
-        type: "error",
-        message: err.message || "Lỗi khi lưu cấu hình. Vui lòng kiểm tra kết nối.",
-      });
+      setToast({ type: "error", message: err.message || "Lỗi khi lưu cài đặt" });
     } finally {
       setIsSaving(false);
     }
   };
 
-  // Reset to server state
-  const handleReset = () => {
-    if (storeSetting) {
-      setStoreName(storeSetting.name || "Cửa Hàng");
-      setCostingMethod(storeSetting.costing_method || "WAC");
-    }
-    setLocalModules(enabledModules);
-    setToast({
-      type: "info",
-      message: "Đã hoàn tác các thay đổi chưa lưu.",
-    });
-  };
-
-  const activeModuleCount = Object.values(localModules).filter(Boolean).length;
-
   return (
-    <div className="space-y-8 max-w-6xl mx-auto pb-16">
-      {/* Toast Notification Banner */}
+    <div className="space-y-6 max-w-5xl mx-auto pb-16">
+      <PageHeader
+        title="Cài Đặt Hệ Thống & Cửa Hàng"
+        description="Thông tin doanh nghiệp, phương pháp tính giá vốn và cấu hình tài chính."
+        badge={<Badge variant="brand">Toàn bộ tính năng hoạt động</Badge>}
+      />
+
       {toast && (
         <AlertBanner
           type={toast.type}
@@ -316,321 +130,133 @@ export default function SettingsPage() {
         />
       )}
 
-      {/* Screen Header */}
-      <PageHeader
-        title="Cài đặt Cửa hàng & Mô-đun Nghiệp vụ"
-        description="Bật tắt linh hoạt theo đặc thù kinh doanh: Hải sản/Cân ký, Thời trang/Size-Màu, F&B/Định mức chế biến."
-        badge={
-          <div className="flex items-center gap-2">
-            <Badge variant="brand">
-              {activeModuleCount}/7 Tính năng đang bật
-            </Badge>
-            {activePresetKey ? (
-              <Badge variant="brand">
-                Mẫu: {PRESETS.find((p) => p.key === activePresetKey)?.subtitle}
-              </Badge>
-            ) : (
-              <Badge variant="default">
-                Tùy chỉnh (Custom)
-              </Badge>
-            )}
-          </div>
-        }
-      />
-
-      {/* SECTION 1: 1-Click Industry Presets */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-bold text-text-main flex items-center gap-2">
-              <Sliders className="w-5 h-5 text-brand" />
-              1-Click Industry Presets (Mẫu Ngành Hàng Thiết Lập Nhanh)
+      {/* Main Settings Form */}
+      <form onSubmit={handleSave} className="space-y-6">
+        <section className="bg-surface-card rounded-xl p-5 sm:p-6 border border-border-default shadow-xs space-y-4">
+          <div className="border-b border-border-subtle pb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-text-main flex items-center gap-2">
+              <Store className="w-4 h-4 text-brand" />
+              <span>1. Thông tin Cửa hàng & Định chế Tài chính</span>
             </h2>
-            <p className="text-xs text-text-sub mt-0.5">
-              Chọn mẫu phù hợp để hệ thống tự động kích hoạt bộ cờ tính năng chuẩn cho ngành của bạn.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {PRESETS.map((preset) => {
-            const Icon = preset.icon;
-            const isCurrent = activePresetKey === preset.key;
-            const isLoading = applyingPreset === preset.key;
-
-            return (
-              <div
-                key={preset.key}
-                className={`bg-surface-card rounded-xl p-5 border transition-all duration-200 shadow-card flex flex-col justify-between ${
-                  isCurrent
-                    ? `${preset.activeColor} bg-surface-card ring-1`
-                    : "border-border-subtle hover:border-border-default hover:shadow-md"
-                }`}
-              >
-                <div>
-                  {/* Preset Header */}
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${preset.iconBg}`}>
-                        <Icon className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-text-main text-base leading-snug">
-                          {preset.title}
-                        </h3>
-                        <span className={`inline-block text-[10px] font-semibold px-2 py-0.5 rounded border mt-0.5 ${preset.badgeColor}`}>
-                          {preset.subtitle}
-                        </span>
-                      </div>
-                    </div>
-
-                    {isCurrent && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
-                        <Check className="w-3 h-3" /> Đang dùng
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Description */}
-                  <p className="text-xs text-text-sub leading-relaxed mb-4">
-                    {preset.description}
-                  </p>
-
-                  {/* Enabled Features List */}
-                  <div className="space-y-1.5 pt-3 border-t border-border-subtle mb-5">
-                    <div className="text-[11px] font-semibold text-text-disabled uppercase tracking-wider mb-1">
-                      Cấu hình tính năng:
-                    </div>
-                    {preset.features.map((feat) => (
-                      <div
-                        key={feat.key}
-                        className="flex items-center justify-between text-xs py-0.5"
-                      >
-                        <span className={feat.state ? "text-text-main font-medium" : "text-text-disabled line-through"}>
-                          {feat.label}
-                        </span>
-                        {feat.state ? (
-                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
-                            BẬT
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-medium text-slate-400 bg-slate-50 px-1.5 py-0.2 rounded border border-slate-200">
-                            TẮT
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Apply Button */}
-                <button
-                  type="button"
-                  disabled={isLoading || isCurrent}
-                  onClick={() => handleApplyPreset(preset.key)}
-                  className={`w-full py-2.5 px-4 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-2 ${
-                    isCurrent
-                      ? "bg-surface-muted text-text-disabled cursor-default border border-border-subtle"
-                      : "bg-brand text-white hover:bg-brand-hover shadow-sm active:scale-[0.99]"
-                  }`}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Đang áp dụng...</span>
-                    </>
-                  ) : isCurrent ? (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Mẫu đang kích hoạt</span>
-                    </>
-                  ) : (
-                    <span>Áp dụng mẫu này</span>
-                  )}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* SECTION 2: Fine-Grained Feature Flags & Store Settings */}
-      <form onSubmit={handleSaveSettings} className="space-y-6">
-        <div className="bg-surface-card rounded-2xl p-6 border border-border-subtle shadow-card space-y-6">
-          <div>
-            <h2 className="text-lg font-bold text-text-main flex items-center gap-2">
-              <Store className="w-5 h-5 text-brand" />
-              Thông tin Cửa hàng & Phương pháp Giá vốn
-            </h2>
-            <p className="text-xs text-text-sub mt-0.5">
-              Cấu hình danh tính kinh doanh và công thức hạch toán tồn kho kế toán.
-            </p>
+            <Badge variant="default">Cấu hình chung</Badge>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-            {/* Store Name Input */}
-            <div className="space-y-2">
-              <label
-                htmlFor="storeName"
-                className="block text-xs font-semibold text-text-main"
-              >
-                Tên Cửa Hàng / Doanh Nghiệp <span className="text-rose-500">*</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-text-main mb-1">
+                Tên cửa hàng / Doanh nghiệp <span className="text-rose-500">*</span>
               </label>
               <input
-                id="storeName"
                 type="text"
                 required
                 value={storeName}
                 onChange={(e) => setStoreName(e.target.value)}
-                placeholder="Ví dụ: Hải Sản Biển Đông, Shop Bella, ..."
-                className="w-full px-3.5 py-2.5 rounded-lg border border-border-default focus:border-brand focus:ring-1 focus:ring-brand text-sm bg-white text-text-main transition shadow-sm outline-none"
+                className="w-full px-3.5 py-2 text-xs bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand font-medium text-text-main"
               />
-              <p className="text-[11px] text-text-sub">
-                Tên sẽ xuất hiện trên thanh điều hướng, phiếu nhập kho và hóa đơn bán lẻ.
-              </p>
             </div>
 
-            {/* Costing Method Selector */}
-            <div className="space-y-2">
-              <label
-                htmlFor="costingMethod"
-                className="block text-xs font-semibold text-text-main"
-              >
-                Phương pháp Tính Giá Vốn Hàng Tồn Kho
-              </label>
-              <select
-                id="costingMethod"
-                value={costingMethod}
-                onChange={(e) => setCostingMethod(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-border-default focus:border-brand focus:ring-1 focus:ring-brand text-sm bg-white text-text-main transition shadow-sm outline-none"
-              >
-                <option value="WAC">
-                  WAC - Bình quân gia quyền (Weighted Average Cost - Khuyên dùng)
-                </option>
-                <option value="FIFO">
-                  FIFO - Nhập trước xuất trước (First In, First Out)
-                </option>
-              </select>
-              <p className="text-[11px] text-text-sub">
-                {costingMethod === "WAC"
-                  ? "Tự động tính lại giá vốn bình quân gia quyền tức thì sau mỗi lần nhập hàng PO hoặc chế biến mẻ."
-                  : "Xuất hàng và hạch toán giá vốn theo thứ tự lô hàng cũ nhất nhập kho trước."}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Feature Switches Table */}
-        <div className="bg-surface-card rounded-2xl p-6 border border-border-subtle shadow-card space-y-6">
-          <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-bold text-text-main flex items-center gap-2">
-                <Sliders className="w-5 h-5 text-brand" />
-                Bảng Toggle Công Tắc Tính Năng Độc Lập
-              </h2>
-              <p className="text-xs text-text-sub mt-0.5">
-                Bật hoặc tắt từng mô-đun riêng lẻ. Giao diện người dùng sẽ lập tức co giãn tương ứng.
-              </p>
+              <label className="block text-xs font-semibold text-text-main mb-1">
+                Đơn vị tiền tệ hiển thị
+              </label>
+              <input
+                type="text"
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value.toUpperCase())}
+                className="w-full px-3.5 py-2 text-xs bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand font-mono text-text-main"
+              />
             </div>
-            <div className="text-xs font-semibold text-text-sub">
-              Đang bật: <strong className="text-brand font-bold">{activeModuleCount}</strong> / 7 mô-đun
+
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold text-text-main mb-1">
+                Phương pháp tính giá vốn hàng tồn kho
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="p-3 rounded-lg border border-brand bg-brand/5 ring-1 ring-brand cursor-pointer flex items-start gap-2.5">
+                  <input
+                    type="radio"
+                    name="costing"
+                    value="WAC"
+                    checked={costingMethod === "WAC"}
+                    onChange={(e) => setCostingMethod(e.target.value)}
+                    className="mt-0.5 text-brand focus:ring-brand"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-text-main block">
+                      WAC (Bình quân gia quyền thời gian thực)
+                    </span>
+                    <span className="text-[11px] text-text-sub block mt-0.5 leading-relaxed">
+                      Tự động tính lại giá vốn bình quân ngay khi nhập kho hoặc chế biến, đảm bảo tính đúng Lãi/Lỗ tại quầy POS.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="p-3 rounded-lg border border-border-default bg-surface-app opacity-60 cursor-not-allowed flex items-start gap-2.5">
+                  <input
+                    type="radio"
+                    name="costing"
+                    value="FIFO"
+                    disabled
+                    className="mt-0.5 text-text-disabled"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-text-sub block">
+                      FIFO (Nhập trước xuất trước)
+                    </span>
+                    <span className="text-[11px] text-text-disabled block mt-0.5">
+                      Đang được tự động áp dụng khi xuất hàng từ các lô (Batch Lot).
+                    </span>
+                  </div>
+                </label>
+              </div>
             </div>
           </div>
 
-          <div className="divide-y divide-border-subtle">
-            {FEATURE_FLAGS.map((flag) => {
-              const Icon = flag.icon;
-              const isEnabled = !!localModules[flag.key];
+          <div className="pt-3 border-t border-border-subtle flex justify-end">
+            <Button type="submit" variant="primary" size="sm" isLoading={isSaving} disabled={isSaving}>
+              <Save className="w-3.5 h-3.5 mr-1" />
+              <span>Lưu cấu hình</span>
+            </Button>
+          </div>
+        </section>
 
+        {/* System Capabilities Section */}
+        <section className="bg-surface-card rounded-xl p-5 sm:p-6 border border-border-default shadow-xs space-y-4">
+          <div className="border-b border-border-subtle pb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-text-main flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-brand" />
+              <span>2. Toàn bộ Phân hệ Nghiệp vụ Đang Kích Hoạt (8/8)</span>
+            </h2>
+            <Badge variant="inflow">Đầy đủ tính năng</Badge>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {ACTIVE_SYSTEM_CAPABILITIES.map((cap, idx) => {
+              const Icon = cap.icon;
               return (
                 <div
-                  key={flag.key}
-                  className="py-4.5 flex items-center justify-between gap-4 hover:bg-surface-muted/40 px-3 rounded-xl transition"
+                  key={idx}
+                  className="p-3.5 bg-surface-app rounded-xl border border-border-default flex items-start gap-3"
                 >
-                  <div className="flex items-start gap-3.5 max-w-3xl">
-                    <div
-                      className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border mt-0.5 ${flag.accentColor}`}
-                    >
-                      <Icon className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm text-text-main">
-                          {flag.title}
-                        </span>
-                        {isEnabled ? (
-                          <span className="text-[10px] font-bold px-2 py-0.2 bg-emerald-50 text-brand border border-emerald-200 rounded-full">
-                            Đang Bật
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-medium px-2 py-0.2 bg-slate-100 text-text-disabled border border-slate-200 rounded-full">
-                            Đang Tắt
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-text-sub mt-1 leading-relaxed">
-                        {flag.description}
-                      </p>
-                    </div>
+                  <div className="p-2 rounded-lg bg-surface-card border border-border-subtle text-brand shrink-0">
+                    <Icon className="w-4 h-4" />
                   </div>
-
-                  {/* Toggle Switch Component */}
-                  <div className="shrink-0">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={isEnabled}
-                      onClick={() => handleToggleModule(flag.key)}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 ${
-                        isEnabled ? "bg-brand" : "bg-slate-200"
-                      }`}
-                    >
-                      <span className="sr-only">{flag.title}</span>
-                      <span
-                        aria-hidden="true"
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                          isEnabled ? "translate-x-5" : "translate-x-0"
-                        }`}
-                      />
-                    </button>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-xs text-text-main">
+                        {cap.title}
+                      </span>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    </div>
+                    <p className="text-[11px] text-text-sub mt-0.5 leading-relaxed">
+                      {cap.desc}
+                    </p>
                   </div>
                 </div>
               );
             })}
           </div>
-
-          {/* Form Action Buttons */}
-          <div className="pt-6 border-t border-border-subtle flex flex-col sm:flex-row items-center justify-between gap-4">
-            <button
-              type="button"
-              onClick={handleReset}
-              className="text-xs text-text-sub hover:text-text-main flex items-center gap-1.5 font-medium px-3 py-2 rounded-lg hover:bg-surface-muted transition"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Khôi phục giá trị đã lưu</span>
-            </button>
-
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-hover shadow-sm transition flex items-center justify-center gap-2 disabled:opacity-70 active:scale-[0.99]"
-              >
-                {isSaving ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Đang lưu cấu hình...</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4" />
-                    <span>Lưu cấu hình</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
+        </section>
       </form>
     </div>
   );

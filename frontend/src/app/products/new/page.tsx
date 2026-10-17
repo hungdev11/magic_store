@@ -1,10 +1,16 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useStoreProfile } from "@/lib/store";
-import { api, Category, CreateProductInput, Unit } from "@/lib/api";
+import {
+  api,
+  Category,
+  CreateProductInput,
+  ProductArchetype,
+  Unit,
+  Product,
+} from "@/lib/api";
 import { formatVND } from "@/lib/design-tokens";
 import {
   slugify,
@@ -18,38 +24,146 @@ import {
   Badge,
   Button,
   AlertBanner,
+  Modal,
+  SearchableSelect,
 } from "@/components/common";
 import {
   Package,
   Layers,
   Scale,
   Factory,
-  UtensilsCrossed,
   Plus,
   Trash2,
-  Sparkles,
-  Info,
-  CheckCircle2,
   AlertCircle,
   Save,
-  Loader2,
-  Tag,
   Wand2,
   ArrowRightLeft,
+  CheckCircle2,
+  Coffee,
+  Image as ImageIcon,
+  Boxes,
+  CookingPot,
+  Wrench,
+  Tag,
+  Clock,
 } from "lucide-react";
 
-const COMMON_CONVERSION_RULES: Record<string, { uom_name: string; conversion_factor: number; is_variable_ratio: boolean }[]> = {
+interface ConversionRow {
+  uom_name: string;
+  conversion_factor: number;
+  is_variable_ratio: boolean;
+  default_price_for_uom: number | undefined;
+  barcode?: string;
+  selling_price?: number | undefined;
+}
+
+interface FnbSizeRow {
+  name: string;
+  price: number;
+  cost: number;
+}
+
+interface FnbModifierRow {
+  name: string;
+  price: number;
+  linked_variant_id?: string;
+  deduct_qty?: number;
+}
+
+const PRODUCT_TYPES = [
+  {
+    key: "FINISHED_GOOD",
+    label: "Thành phẩm",
+    desc: "Hàng hóa hoàn chỉnh sẵn sàng bán lẻ / giao khách (Bia, Áo, Trà sữa, Bánh mì...)",
+    icon: Package,
+    color: "border-brand text-brand bg-brand/5",
+  },
+  {
+    key: "RAW_MATERIAL",
+    label: "Nguyên vật liệu",
+    desc: "Nguyên liệu thô để nấu, pha chế, làm topping hoặc đóng gói (Trân châu, Bột, Đường, Vỏ hộp...)",
+    icon: CookingPot,
+    color: "border-amber-600 text-amber-700 bg-amber-50",
+  },
+  {
+    key: "WIP_SEMI_FINISHED",
+    label: "Bán thành phẩm",
+    desc: "Đã qua sơ chế hoặc chế biến dở dang (Nước cốt trà, Pate tự làm, Cá đã làm sạch...)",
+    icon: Boxes,
+    color: "border-blue-600 text-blue-700 bg-blue-50",
+  },
+  {
+    key: "SERVICE",
+    label: "Dịch vụ",
+    desc: "Phí dịch vụ, công gia công chế biến, phí vận chuyển không quản lý tồn kho",
+    icon: Wrench,
+    color: "border-purple-600 text-purple-700 bg-purple-50",
+  },
+  {
+    key: "COMBO",
+    label: "Gói / Combo đóng gói",
+    desc: "Bộ sản phẩm gồm nhiều mặt hàng (1 Bánh mì + 1 Nước ngọt, Set quà tặng...)",
+    icon: Boxes,
+    color: "border-teal-600 text-teal-700 bg-teal-50",
+  },
+];
+
+const ARCHETYPES: {
+  key: ProductArchetype;
+  label: string;
+  subLabel: string;
+  desc: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  {
+    key: "STANDARD",
+    label: "Hàng đóng gói / Tiêu chuẩn",
+    subLabel: "Đa ĐVT (Thùng/Lốc/Lon)",
+    desc: "Bia, nước ngọt, bánh kẹo, hàng tiêu dùng. Quét barcode riêng cho từng đơn vị tính.",
+    icon: Package,
+  },
+  {
+    key: "MATRIX",
+    label: "Thời trang / Đa biến thể",
+    subLabel: "Màu sắc × Kích cỡ",
+    desc: "Quần áo, giày dép, phụ kiện. Tự động sinh ma trận SKU theo tổ hợp thuộc tính kèm ảnh riêng.",
+    icon: Layers,
+  },
+  {
+    key: "CATCH_WEIGHT",
+    label: "Hàng tươi sống / Cân ký",
+    subLabel: "Cân thực tế & Lô HSD",
+    desc: "Cá tươi, tôm, thịt, rau củ quả. Bắt buộc cân tại POS và theo dõi số lô hạn dùng.",
+    icon: Scale,
+  },
+  {
+    key: "MANUFACTURED",
+    label: "Chế biến / F&B (BOM)",
+    subLabel: "Size, Topping & Công thức",
+    desc: "Trà sữa, cà phê, bánh mì, pha lóc. Cấu hình size giá, topping đồ kèm và trừ kho tự động.",
+    icon: Factory,
+  },
+  {
+    key: "COMBO",
+    label: "Combo / Gói sản phẩm",
+    subLabel: "Đóng gói nhiều mặt hàng",
+    desc: "Bữa sáng, combo ăn trưa, set quà tặng. Gồm các sản phẩm con, bán tự trừ kho từng món.",
+    icon: Boxes,
+  },
+];
+
+const COMMON_CONVERSION_RULES: Record<
+  string,
+  { uom_name: string; conversion_factor: number; is_variable_ratio: boolean }[]
+> = {
   kg: [
     { uom_name: "g", conversion_factor: 0.001, is_variable_ratio: false },
     { uom_name: "con", conversion_factor: 1, is_variable_ratio: true },
   ],
-  kilogram: [
-    { uom_name: "g", conversion_factor: 0.001, is_variable_ratio: false },
-  ],
   thùng: [
     { uom_name: "lon", conversion_factor: 24, is_variable_ratio: false },
     { uom_name: "chai", conversion_factor: 24, is_variable_ratio: false },
-    { uom_name: "hộp", conversion_factor: 12, is_variable_ratio: false },
+    { uom_name: "lốc", conversion_factor: 6, is_variable_ratio: false },
   ],
   hộp: [
     { uom_name: "cái", conversion_factor: 10, is_variable_ratio: false },
@@ -58,80 +172,79 @@ const COMMON_CONVERSION_RULES: Record<string, { uom_name: string; conversion_fac
   lít: [
     { uom_name: "ml", conversion_factor: 0.001, is_variable_ratio: false },
   ],
-  lit: [
-    { uom_name: "ml", conversion_factor: 0.001, is_variable_ratio: false },
-  ],
   bao: [
     { uom_name: "kg", conversion_factor: 50, is_variable_ratio: false },
   ],
 };
 
 const COMMON_UOMS = [
-  "kg",
-  "g",
   "cái",
-  "hộp",
-  "đòn",
-  "con",
+  "ly",
+  "tô",
+  "dĩa",
   "lon",
   "chai",
+  "hộp",
+  "gói",
+  "kg",
+  "g",
   "lít",
   "ml",
   "thùng",
+  "lốc",
   "bao",
-  "mét",
+  "con",
+  "đòn",
   "bộ",
-  "khay",
-  "túi",
-];
-
-const PRODUCT_TYPES = [
-  { value: "FINISHED_GOOD", label: "Thành phẩm (Bán lẻ / Thành phẩm hoàn chỉnh)" },
-  { value: "RAW_MATERIAL", label: "Nguyên vật liệu (Dùng để chế biến, nấu nướng)" },
-  { value: "WIP_SEMI_FINISHED", label: "Bán thành phẩm (Đã sơ chế / chờ lắp ráp)" },
-  { value: "SERVICE", label: "Dịch vụ (Công chế biến, vận chuyển, dịch vụ)" },
-  { value: "COMBO", label: "Gói hàng Combo (Tập hợp nhiều món)" },
 ];
 
 const PRODUCTION_MODES = [
   {
-    value: "NONE",
-    label: "Không áp dụng BOM (Hàng mua đi bán lại thông thường)",
-    desc: "Sản phẩm không qua chế biến, xuất nhập trực tiếp theo tồn kho.",
+    value: "POS_BACKFLUSH",
+    label: "Bán hàng tự trừ nguyên vật liệu (POS_BACKFLUSH)",
+    desc: "Thu ngân bấm bán tại POS (ví dụ: 1 ly Trà sữa / 1 ổ Bánh mì), kho tự trừ nguyên liệu & topping.",
   },
   {
     value: "BATCH_MANUFACTURE",
     label: "Sản xuất theo mẻ (ASSEMBLY)",
-    desc: "Lập lệnh sản xuất mẻ thành phẩm (ví dụ: Nấu 50 đòn chả lụa), kho tự trừ nguyên vật liệu thịt/mỡ.",
-  },
-  {
-    value: "POS_BACKFLUSH",
-    label: "Bán hàng tự trừ nguyên vật liệu (POS_BACKFLUSH)",
-    desc: "Khi thu ngân bấm bán tại POS (ví dụ: 1 ổ Bánh mì), kho tự động trừ vỏ bánh mì, pate, chả theo định mức.",
+    desc: "Lập lệnh sản xuất mẻ thành phẩm (ví dụ: Nấu 50 đòn chả lụa), kho tự trừ thịt/mỡ.",
   },
   {
     value: "DISASSEMBLY",
     label: "Pha lóc / Mổ xẻ chia phần (DISASSEMBLY)",
-    desc: "Nhập nguyên liệu nguyên con (ví dụ: Cá hồi 5kg), mổ xẻ ra thịt phi-lê, đầu cá, xương và tự động phân bổ giá vốn.",
+    desc: "Nhập nguyên con (ví dụ: Cá hồi 5kg), mổ xẻ ra phi-lê, đầu cá và tự phân bổ giá vốn.",
+  },
+  {
+    value: "NONE",
+    label: "Chỉ quản lý Size & Topping (Không trừ kho công thức)",
+    desc: "Phù hợp quán ăn nhỏ chưa cần quản lý kho nguyên vật liệu pha chế chi tiết.",
   },
 ];
 
-interface ConversionRow {
-  uom_name: string;
-  conversion_factor: number;
-  is_variable_ratio: boolean;
-  default_price_for_uom: number | undefined;
-}
-
 export default function NewProductPage() {
   const router = useRouter();
-  const { isModuleEnabled, storeSetting } = useStoreProfile();
 
-  // Categories & Units
+  // 1. Phân loại sản phẩm (Product Type)
+  const [productType, setProductType] = useState("FINISHED_GOOD");
+
+  // 2. Bản chất hàng hóa (Product Archetype)
+  const [archetype, setArchetype] = useState<ProductArchetype>("STANDARD");
+
+  // Master Data
   const [categories, setCategories] = useState<Category[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
-  const [isAddingNewCat, setIsAddingNewCat] = useState(false);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+
+  // Entity Creation Modals
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [newCatName, setNewCatName] = useState("");
+  const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
+  const [newUnitName, setNewUnitName] = useState("");
+  const [isToppingModalOpen, setIsToppingModalOpen] = useState(false);
+  const [newToppingName, setNewToppingName] = useState("");
+  const [newToppingPrice, setNewToppingPrice] = useState<number>(5000);
+  const [newToppingCost, setNewToppingCost] = useState<number>(2000);
+  const [newToppingUom, setNewToppingUom] = useState("phần");
 
   // Block 1: Basic Information
   const [name, setName] = useState("");
@@ -139,114 +252,304 @@ export default function NewProductPage() {
   const [barcode, setBarcode] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [baseUom, setBaseUom] = useState("cái");
-  const [customUom, setCustomUom] = useState("");
-  const [productType, setProductType] = useState("FINISHED_GOOD");
   const [imageUrl, setImageUrl] = useState("");
 
-  // Single-product pricing & inventory (when matrix is off)
+  // Shelf Life & Expiry Warning
+  const [shelfLifeDays, setShelfLifeDays] = useState<number | null>(null);
+  const [expiryWarningDays, setExpiryWarningDays] = useState<number | null>(null);
+
+  // Pricing & Inventory (Standard single variant)
   const [costPrice, setCostPrice] = useState<number>(0);
   const [baseSellingPrice, setBaseSellingPrice] = useState<number>(0);
   const [minSellingPrice, setMinSellingPrice] = useState<number>(0);
   const [initialStock, setInitialStock] = useState<number>(0);
 
-  // Block 2: Matrix Variants (matrix_variants = true)
-  const [useMatrix, setUseMatrix] = useState(false);
+  // Archetype: STANDARD -> Multi-UOM Conversions
+  const [conversions, setConversions] = useState<ConversionRow[]>([]);
+
+  // Archetype: MATRIX -> Color x Size Variants
   const [attributes, setAttributes] = useState<AttributeInput[]>([
     { name: "Màu sắc", valuesStr: "Đỏ, Đen, Trắng" },
     { name: "Kích cỡ", valuesStr: "S, M, L" },
   ]);
   const [generatedVariants, setGeneratedVariants] = useState<GeneratedVariant[]>([]);
 
-  // Block 3: Catch-weight & Secondary Units (catch_weight = true)
-  const [isWeighable, setIsWeighable] = useState(false);
-  const [showConversionsSection, setShowConversionsSection] = useState(false);
-  const [conversions, setConversions] = useState<ConversionRow[]>([]);
+  // Archetype: CATCH_WEIGHT -> Weighable & Batches
+  const [isWeighable, setIsWeighable] = useState(true);
+  const [trackBatches, setTrackBatches] = useState(true);
 
-  // Block 4: BOM Production (bom_production = true)
-  const [productionMode, setProductionMode] = useState("NONE");
+  // Archetype: MANUFACTURED -> F&B Sizes & Toppings
+  const [productionMode, setProductionMode] = useState("POS_BACKFLUSH");
+  const [hasSizes, setHasSizes] = useState(true);
+  const [fnbSizes, setFnbSizes] = useState<FnbSizeRow[]>([
+    { name: "Size M (Vừa)", price: 25000, cost: 10000 },
+    { name: "Size L (Lớn)", price: 32000, cost: 13000 },
+  ]);
+  const [fnbModifiers, setFnbModifiers] = useState<FnbModifierRow[]>([]);
 
-  // Block 5: Product Modifiers (product_modifiers = true)
-  const [allowModifiers, setAllowModifiers] = useState(false);
-  const [modifierNotes, setModifierNotes] = useState("");
+  // Archetype: COMBO -> Bundle components
+  interface ComboComponentRow {
+    variant_id: string;
+    product_name: string;
+    variant_name: string;
+    qty: number;
+    cost_price: number;
+    selling_price: number;
+  }
+  const [comboComponents, setComboComponents] = useState<ComboComponentRow[]>([]);
 
-  // Submission state
+  // Form State
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Load initial categories & units
-  useEffect(() => {
-    Promise.all([
-      api.getCategories(),
-      api.getUnits(true),
-    ])
-      .then(([cats, uoms]) => {
-        setCategories(cats || []);
-        if (cats && cats.length > 0) {
-          setCategoryId(cats[0].id);
-        }
-        setUnits(uoms || []);
-        if (uoms && uoms.length > 0) {
-          const firstUom = uoms[0].name.toLowerCase();
-          setBaseUom(firstUom);
-          // Suggest conversions if preset exists
-          const matched = COMMON_CONVERSION_RULES[firstUom];
-          if (matched && matched.length > 0) {
-            setConversions(matched.map(m => ({ ...m, default_price_for_uom: undefined })));
-          }
-        }
-      })
-      .catch((err) => {
-        console.error("Lỗi khi tải dữ liệu ban đầu:", err);
-      });
-  }, []);
-
-  const handleApplySuggestedConversions = (targetUom?: string) => {
-    const key = (targetUom || baseUom).toLowerCase().trim();
-    const matched = COMMON_CONVERSION_RULES[key];
-    if (matched && matched.length > 0) {
-      setConversions(matched.map(m => ({
-        uom_name: m.uom_name,
-        conversion_factor: m.conversion_factor,
-        is_variable_ratio: m.is_variable_ratio,
-        default_price_for_uom: undefined,
-      })));
+  // Load initial categories, units, and products for topping link
+  const loadMasterData = async () => {
+    try {
+      const [cats, uoms, prods] = await Promise.all([
+        api.getCategories(),
+        api.getUnits(true),
+        api.getProducts(),
+      ]);
+      setCategories(cats || []);
+      if (cats && cats.length > 0 && !categoryId) {
+        setCategoryId(cats[0].id);
+      }
+      setUnits(uoms || []);
+      if (uoms && uoms.length > 0 && !baseUom) {
+        setBaseUom(uoms[0].name.toLowerCase());
+      }
+      setAllProducts(prods || []);
+    } catch (err) {
+      console.error("Lỗi khi tải master data:", err);
     }
   };
 
+  useEffect(() => {
+    loadMasterData();
+  }, []);
+
+  // Modal 1: Quick Create Category
+  const handleQuickCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCatName.trim()) return;
+    try {
+      const created = await api.createCategory({ name: newCatName.trim() });
+      setCategories((prev) => [...prev, created]);
+      setCategoryId(created.id);
+      setNewCatName("");
+      setIsCategoryModalOpen(false);
+    } catch (err: any) {
+      alert(err.message || "Lỗi tạo danh mục");
+    }
+  };
+
+  // Modal 2: Quick Create Unit
+  const handleQuickCreateUnit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUnitName.trim()) return;
+    try {
+      const created = await api.createUnit({ name: newUnitName.trim() });
+      setUnits((prev) => [...prev, created]);
+      setBaseUom(created.name.toLowerCase());
+      setNewUnitName("");
+      setIsUnitModalOpen(false);
+    } catch (err: any) {
+      alert(err.message || "Lỗi tạo đơn vị tính");
+    }
+  };
+
+  // Modal 3: Quick Create Topping Product (as RAW_MATERIAL)
+  const handleQuickCreateTopping = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newToppingName.trim()) return;
+    try {
+      const tCode = `TOP_${slugify(newToppingName).toUpperCase()}`;
+      const defaultCatId = categoryId || (categories[0] ? categories[0].id : undefined);
+
+      const created = await api.createProduct({
+        name: newToppingName.trim(),
+        code: tCode,
+        category_id: defaultCatId,
+        product_type: "RAW_MATERIAL",
+        archetype: "STANDARD",
+        base_uom: newToppingUom.trim().toLowerCase(),
+        cost_price: Number(newToppingCost || 0),
+        base_selling_price: Number(newToppingPrice || 0),
+      });
+
+      setAllProducts((prev) => [...prev, created]);
+      const vId = created.variants?.[0]?.id;
+      setFnbModifiers((prev) => [
+        ...prev,
+        {
+          name: created.name,
+          price: Number(newToppingPrice || 0),
+          linked_variant_id: vId,
+          deduct_qty: 1,
+        },
+      ]);
+      setNewToppingName("");
+      setIsToppingModalOpen(false);
+    } catch (err: any) {
+      alert(err.message || "Lỗi tạo nguyên liệu topping");
+    }
+  };
+
+  // Combo Component Handlers
+  const handleAddComboComponent = (variantId: string) => {
+    if (!variantId) return;
+    for (const p of allProducts) {
+      const v = (p.variants || []).find((varItem) => varItem.id === variantId);
+      if (v) {
+        if (comboComponents.some((c) => c.variant_id === v.id)) return;
+        setComboComponents((prev) => [
+          ...prev,
+          {
+            variant_id: v.id,
+            product_name: p.name,
+            variant_name: v.variant_name || p.name,
+            qty: 1,
+            cost_price: Number(v.cost_price || 0),
+            selling_price: Number(v.base_selling_price || 0),
+          },
+        ]);
+        break;
+      }
+    }
+  };
+
+  const handleUpdateComboComponentQty = (idx: number, qty: number) => {
+    setComboComponents((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], qty: Math.max(0.01, qty) };
+      return next;
+    });
+  };
+
+  const handleRemoveComboComponent = (idx: number) => {
+    setComboComponents((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const suggestedComboCost = useMemo(() => {
+    return comboComponents.reduce((sum, c) => sum + c.cost_price * c.qty, 0);
+  }, [comboComponents]);
+
+  const suggestedComboRetail = useMemo(() => {
+    return comboComponents.reduce((sum, c) => sum + c.selling_price * c.qty, 0);
+  }, [comboComponents]);
+
+  useEffect(() => {
+    if (archetype === "COMBO" && comboComponents.length > 0) {
+      setCostPrice(suggestedComboCost);
+      if (baseSellingPrice === 0) {
+        setBaseSellingPrice(suggestedComboRetail);
+      }
+    }
+  }, [archetype, comboComponents.length, suggestedComboCost, suggestedComboRetail, baseSellingPrice]);
+
+  // Hierarchical Category Options
+  const categoryOptions = useMemo(() => {
+    const parentMap = new Map<string, Category>();
+    const childrenMap = new Map<string, Category[]>();
+
+    categories.forEach((c) => {
+      if (!c.parent_id) {
+        parentMap.set(c.id, c);
+      } else {
+        const list = childrenMap.get(c.parent_id) || [];
+        list.push(c);
+        childrenMap.set(c.parent_id, list);
+      }
+    });
+
+    const opts: { value: string; label: string; badge?: string }[] = [];
+    categories.forEach((c) => {
+      if (!c.parent_id) {
+        opts.push({ value: c.id, label: c.name, badge: "Danh mục cha" });
+        const kids = childrenMap.get(c.id) || [];
+        kids.forEach((k) => {
+          opts.push({ value: k.id, label: `└─ ${k.name}`, badge: c.name });
+        });
+      }
+    });
+
+    categories.forEach((c) => {
+      if (c.parent_id && !parentMap.has(c.parent_id)) {
+        opts.push({ value: c.id, label: c.name });
+      }
+    });
+
+    return opts;
+  }, [categories]);
+
+  // Unit Options
+  const unitOptions = useMemo(() => {
+    return units.map((u) => ({
+      value: u.name.toLowerCase(),
+      label: u.name,
+    }));
+  }, [units]);
+
+  // Eligible Topping Products (Food & Beverage only, strictly excludes clothing/fashion)
+  const eligibleToppingProducts = useMemo(() => {
+    return allProducts.filter((p) => {
+      const cat = categories.find((c) => c.id === p.category_id);
+      const catName = (cat?.name || "").toLowerCase();
+      const prodName = p.name.toLowerCase();
+
+      const isFashion =
+        /thời trang|quần áo|may mặc|giày|dép|áo thun|sơ mi|quần jean|phụ kiện vải/i.test(catName) ||
+        /áo |quần |giày |váy |đầm /i.test(prodName);
+      if (isFashion) return false;
+
+      return (
+        p.product_type === "RAW_MATERIAL" ||
+        p.product_type === "WIP_SEMI_FINISHED" ||
+        p.product_type === "FINISHED_GOOD"
+      );
+    });
+  }, [allProducts, categories]);
+
+  // When base UOM changes, auto-suggest conversions if empty
   const handleBaseUomChange = (newUom: string) => {
     setBaseUom(newUom);
     if (conversions.length === 0) {
       const matched = COMMON_CONVERSION_RULES[newUom.toLowerCase().trim()];
       if (matched && matched.length > 0) {
-        setConversions(matched.map(m => ({
-          uom_name: m.uom_name,
-          conversion_factor: m.conversion_factor,
-          is_variable_ratio: m.is_variable_ratio,
-          default_price_for_uom: undefined,
-        })));
+        setConversions(
+          matched.map((m) => ({
+            uom_name: m.uom_name,
+            conversion_factor: m.conversion_factor,
+            is_variable_ratio: m.is_variable_ratio,
+            default_price_for_uom: undefined,
+          }))
+        );
       }
     }
   };
 
-  // Sync default matrix state when module is loaded
-  useEffect(() => {
-    if (isModuleEnabled("matrix_variants")) {
-      setUseMatrix(true);
-    }
-    if (isModuleEnabled("catch_weight")) {
-      setIsWeighable(true);
-    }
-  }, [isModuleEnabled]);
-
-  // Auto-generate code from name if code is empty
-  const handleNameBlur = () => {
-    if (!code && name.trim()) {
-      const generatedCode = slugify(name);
-      setCode(generatedCode);
+  const handleApplySuggestedConversions = () => {
+    const key = baseUom.toLowerCase().trim();
+    const matched = COMMON_CONVERSION_RULES[key];
+    if (matched && matched.length > 0) {
+      setConversions(
+        matched.map((m) => ({
+          uom_name: m.uom_name,
+          conversion_factor: m.conversion_factor,
+          is_variable_ratio: m.is_variable_ratio,
+          default_price_for_uom: undefined,
+        }))
+      );
     }
   };
 
-  // Matrix generation handler
+  const handleNameBlur = () => {
+    if (!code && name.trim()) {
+      setCode(slugify(name));
+    }
+  };
+
+  // Matrix handlers
   const handleGenerateMatrix = () => {
     const variants = generateVariantsFromAttributes(
       code || slugify(name),
@@ -260,7 +563,6 @@ export default function NewProductPage() {
     setGeneratedVariants(variants);
   };
 
-  // Sync prices to all matrix variants
   const handleApplyBulkPrices = () => {
     setGeneratedVariants((prev) =>
       prev.map((v) => ({
@@ -289,7 +591,6 @@ export default function NewProductPage() {
     setGeneratedVariants((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Attribute list handlers
   const handleAddAttribute = () => {
     setAttributes((prev) => [...prev, { name: "", valuesStr: "" }]);
   };
@@ -298,7 +599,11 @@ export default function NewProductPage() {
     setAttributes((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleAttributeChange = (index: number, field: "name" | "valuesStr", value: string) => {
+  const handleAttributeChange = (
+    index: number,
+    field: "name" | "valuesStr",
+    value: string
+  ) => {
     setAttributes((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value };
@@ -306,7 +611,7 @@ export default function NewProductPage() {
     });
   };
 
-  // UOM Conversion handlers
+  // Conversion handlers
   const handleAddConversion = () => {
     setConversions((prev) => [
       ...prev,
@@ -323,10 +628,63 @@ export default function NewProductPage() {
     setConversions((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleConversionChange = (index: number, field: keyof ConversionRow, value: any) => {
+  const handleConversionChange = (
+    index: number,
+    field: keyof ConversionRow,
+    value: any
+  ) => {
     setConversions((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  // F&B Size handlers
+  const handleAddFnbSize = () => {
+    setFnbSizes((prev) => [
+      ...prev,
+      { name: `Size ${String.fromCharCode(65 + prev.length)}`, price: 30000, cost: 12000 },
+    ]);
+  };
+
+  const handleRemoveFnbSize = (index: number) => {
+    setFnbSizes((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleUpdateFnbSize = (index: number, field: keyof FnbSizeRow, val: any) => {
+    setFnbSizes((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: val };
+      return next;
+    });
+  };
+
+  // F&B Modifier handlers
+  const handleAddFnbModifierFromExisting = (variantId: string) => {
+    const prod = allProducts.find((p) => (p.variants || []).some((v) => v.id === variantId));
+    const variant = prod?.variants?.find((v) => v.id === variantId);
+    if (!variant) return;
+
+    setFnbModifiers((prev) => [
+      ...prev,
+      {
+        name: variant.variant_name || prod?.name || "Topping",
+        price: Number(variant.base_selling_price || 5000),
+        linked_variant_id: variant.id,
+        deduct_qty: 1,
+      },
+    ]);
+  };
+
+  const handleRemoveFnbModifier = (index: number) => {
+    setFnbModifiers((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleUpdateFnbModifier = (index: number, field: keyof FnbModifierRow, val: any) => {
+    setFnbModifiers((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: val };
       return next;
     });
   };
@@ -347,9 +705,8 @@ export default function NewProductPage() {
       return;
     }
 
-    const finalBaseUom = baseUom === "KHAC" ? customUom.trim() : baseUom;
-    if (!finalBaseUom) {
-      setFormError("Vui lòng chọn hoặc nhập Đơn vị tính cơ sở.");
+    if (!baseUom.trim()) {
+      setFormError("Vui lòng chọn Đơn vị tính cơ sở.");
       return;
     }
 
@@ -358,12 +715,7 @@ export default function NewProductPage() {
     try {
       // 1. Resolve Category
       let resolvedCategoryId = categoryId;
-
-      if (isAddingNewCat && newCatName.trim()) {
-        const createdCat = await api.createCategory({ name: newCatName.trim() });
-        resolvedCategoryId = createdCat.id;
-      } else if (!resolvedCategoryId) {
-        // If no category exists at all in the DB, create a default "Chung"
+      if (!resolvedCategoryId) {
         if (categories.length === 0) {
           const defaultCat = await api.createCategory({ name: "Hàng hóa chung" });
           resolvedCategoryId = defaultCat.id;
@@ -372,32 +724,72 @@ export default function NewProductPage() {
         }
       }
 
-      // 2. Prepare UOM conversions
-      const uomConversionsPayload = conversions
-        .filter((c) => c.uom_name.trim().length > 0 && c.conversion_factor > 0)
-        .map((c) => ({
-          uom_name: c.uom_name.trim(),
-          conversion_factor: Number(c.conversion_factor),
-          is_variable_ratio: !!c.is_variable_ratio,
-          default_price_for_uom: c.default_price_for_uom ? Number(c.default_price_for_uom) : undefined,
-        }));
+      // 2. Prepare UOM conversions (STANDARD or CATCH_WEIGHT)
+      const uomConversionsPayload =
+        archetype === "STANDARD" || archetype === "CATCH_WEIGHT"
+          ? conversions
+              .filter((c) => c.uom_name.trim().length > 0 && c.conversion_factor > 0)
+              .map((c) => ({
+                uom_name: c.uom_name.trim(),
+                conversion_factor: Number(c.conversion_factor),
+                is_variable_ratio: !!c.is_variable_ratio,
+                default_price_for_uom: c.selling_price
+                  ? Number(c.selling_price)
+                  : c.default_price_for_uom
+                  ? Number(c.default_price_for_uom)
+                  : undefined,
+                barcode: c.barcode?.trim() || undefined,
+                selling_price: c.selling_price ? Number(c.selling_price) : undefined,
+              }))
+          : [];
 
-      // 3. Prepare Payload
+      // 3. Handle F&B Modifier Group creation if provided
+      const createdModifierGroupIds: string[] = [];
+      if (archetype === "MANUFACTURED" && fnbModifiers.length > 0) {
+        const validMods = fnbModifiers.filter((m) => m.name.trim().length > 0);
+        if (validMods.length > 0) {
+          const modGroup = await api.createModifierGroup({
+            name: `Topping / Món kèm - ${name.trim()}`,
+            min_selection: 0,
+            is_required: false,
+            items: validMods.map((m) => ({
+              name: m.name.trim(),
+              price: Number(m.price || 0),
+              linked_variant_id: m.linked_variant_id,
+              deduct_qty: Number(m.deduct_qty || 1),
+            })),
+          });
+          createdModifierGroupIds.push(modGroup.id);
+        }
+      }
+
+      // 4. Prepare Payload
       const payload: CreateProductInput = {
         name: name.trim(),
         code: finalCode,
         category_id: resolvedCategoryId,
         product_type: productType,
-        base_uom: finalBaseUom,
+        archetype,
+        base_uom: baseUom.trim().toLowerCase(),
         image_url: imageUrl.trim() || undefined,
-        is_weighable: isModuleEnabled("catch_weight") ? isWeighable : false,
-        production_mode: isModuleEnabled("bom_production") ? productionMode : "NONE",
-        track_inventory: true,
+        track_inventory: productType !== "SERVICE",
+        is_weighable: archetype === "CATCH_WEIGHT" ? isWeighable : false,
+        track_batches:
+          archetype === "CATCH_WEIGHT" ? trackBatches : shelfLifeDays ? true : false,
+        shelf_life_days: shelfLifeDays,
+        expiry_warning_days: expiryWarningDays,
+        production_mode:
+          archetype === "MANUFACTURED"
+            ? productionMode
+            : archetype === "COMBO"
+            ? "POS_BACKFLUSH"
+            : "NONE",
         uom_conversions: uomConversionsPayload,
+        modifier_group_ids: createdModifierGroupIds,
       };
 
-      // 4. Handle Matrix vs Single
-      if (isModuleEnabled("matrix_variants") && useMatrix && generatedVariants.length > 0) {
+      // 5. Handle Variants based on Archetype
+      if (archetype === "MATRIX" && generatedVariants.length > 0) {
         payload.variants = generatedVariants.map((gv) => ({
           sku: gv.sku.trim(),
           variant_name: gv.variant_name.trim(),
@@ -407,9 +799,23 @@ export default function NewProductPage() {
           min_selling_price: Number(gv.min_selling_price || 0),
           current_stock: Number(gv.current_stock || 0),
           image_url: gv.image_url || imageUrl.trim() || undefined,
+          shelf_life_days: shelfLifeDays,
+          expiry_warning_days: expiryWarningDays,
+        }));
+      } else if (archetype === "MANUFACTURED" && hasSizes && fnbSizes.length > 0) {
+        payload.variants = fnbSizes.map((sz) => ({
+          sku: `${finalCode}_${slugify(sz.name).toUpperCase()}`,
+          variant_name: `${name.trim()} (${sz.name.trim()})`,
+          attributes: JSON.stringify({ Size: sz.name.trim() }),
+          cost_price: Number(sz.cost || 0),
+          base_selling_price: Number(sz.price || 0),
+          min_selling_price: Number(sz.cost || 0),
+          current_stock: 0,
+          image_url: imageUrl.trim() || undefined,
+          shelf_life_days: shelfLifeDays,
+          expiry_warning_days: expiryWarningDays,
         }));
       } else {
-        // Single variant product
         payload.cost_price = Number(costPrice || 0);
         payload.base_selling_price = Number(baseSellingPrice || 0);
         payload.min_selling_price = Number(minSellingPrice || 0);
@@ -424,14 +830,30 @@ export default function NewProductPage() {
             min_selling_price: Number(minSellingPrice || 0),
             current_stock: Number(initialStock || 0),
             image_url: imageUrl.trim() || undefined,
+            shelf_life_days: shelfLifeDays,
+            expiry_warning_days: expiryWarningDays,
           },
         ];
       }
 
-      // 5. Send API Request
-      await api.createProduct(payload);
+      const created = await api.createProduct(payload);
 
-      // Redirect to list
+      if (archetype === "COMBO" && comboComponents.length > 0 && created.variants?.[0]?.id) {
+        await api
+          .createBomRecipe({
+            target_variant_id: created.variants[0].id,
+            recipe_type: "ASSEMBLY",
+            output_qty: 1,
+            expected_wastage_percent: 0,
+            items: comboComponents.map((c) => ({
+              component_variant_id: c.variant_id,
+              qty_required: Number(c.qty || 1),
+              cost_allocation_percent: 0,
+            })),
+          })
+          .catch((e) => console.warn("Lỗi khi tạo định mức combo:", e));
+      }
+
       router.push("/products");
     } catch (err: any) {
       setFormError(err.message || "Lỗi khi tạo sản phẩm");
@@ -444,24 +866,8 @@ export default function NewProductPage() {
       {/* Header */}
       <PageHeader
         backHref="/products"
-        title="Thêm Sản phẩm Mới"
-        description="Biểu mẫu tự thích ứng theo cấu hình: Ma trận Màu × Size, Cân ký và Định mức BOM."
-        badge={
-          <Badge variant="brand">
-            Tự thích ứng
-          </Badge>
-        }
-        actions={
-          <Button
-            variant="primary"
-            size="md"
-            onClick={handleSubmit}
-            isLoading={isSubmitting}
-          >
-            <Save className="w-4 h-4 mr-1.5" />
-            <span>Tạo sản phẩm</span>
-          </Button>
-        }
+        title="Thêm Sản Phẩm Mới"
+        description="Xác định phân loại hàng hóa và bản chất kinh doanh để biểu mẫu tinh giản tối ưu."
       />
 
       {formError && (
@@ -472,25 +878,125 @@ export default function NewProductPage() {
         />
       )}
 
+      {/* =========================================================================
+          BƯỚC 1: PHÂN LOẠI SẢN PHẨM (PRODUCT TYPE) - ĐẦU FORM
+      ========================================================================= */}
+      <div className="space-y-2">
+        <label className="block text-xs font-bold uppercase tracking-wider text-text-sub">
+          1. Phân loại sản phẩm trong chuỗi cung ứng *
+        </label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {PRODUCT_TYPES.map((pt) => {
+            const Icon = pt.icon;
+            const isSelected = productType === pt.key;
+            return (
+              <button
+                type="button"
+                key={pt.key}
+                onClick={() => setProductType(pt.key)}
+                className={`p-3 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                  isSelected
+                    ? "border-brand bg-surface-card ring-2 ring-brand/20 shadow-xs"
+                    : "border-border-default bg-surface-card hover:bg-surface-app"
+                }`}
+              >
+                {isSelected && (
+                  <CheckCircle2 className="w-4 h-4 text-brand absolute top-3 right-3" />
+                )}
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div
+                      className={`p-1.5 rounded-lg border ${
+                        isSelected
+                          ? "bg-brand text-white border-brand"
+                          : "bg-surface-app text-text-sub border-border-subtle"
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <span className="font-bold text-xs text-text-main">
+                      {pt.label}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-text-sub leading-snug line-clamp-2">
+                    {pt.desc}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* =========================================================================
+          BƯỚC 2: CHỌN BẢN CHẤT HÀNG HÓA (PRODUCT ARCHETYPE)
+      ========================================================================= */}
+      <div className="space-y-2">
+        <label className="block text-xs font-bold uppercase tracking-wider text-text-sub">
+          2. Bản chất thương mại (Cách 2 - Tinh giản giao diện) *
+        </label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {ARCHETYPES.map((arch) => {
+            const Icon = arch.icon;
+            const isSelected = archetype === arch.key;
+            return (
+              <button
+                type="button"
+                key={arch.key}
+                onClick={() => setArchetype(arch.key)}
+                className={`p-3.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                  isSelected
+                    ? "border-brand bg-surface-card ring-2 ring-brand/20 shadow-xs"
+                    : "border-border-default bg-surface-card hover:bg-surface-app"
+                }`}
+              >
+                {isSelected && (
+                  <CheckCircle2 className="w-4 h-4 text-brand absolute top-3 right-3" />
+                )}
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <div
+                      className={`p-1.5 rounded-lg border ${
+                        isSelected
+                          ? "bg-brand text-white border-brand"
+                          : "bg-surface-app text-text-sub border-border-subtle"
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <span className="font-bold text-xs text-text-main line-clamp-1">
+                      {arch.label}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-text-sub leading-snug line-clamp-2">
+                    {arch.desc}
+                  </p>
+                </div>
+                <div className="mt-2.5 pt-2 border-t border-border-subtle flex items-center justify-between">
+                  <span className="text-[10px] font-mono text-text-disabled">
+                    {arch.subLabel}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* =========================================================================
-            KHỐI 1: THÔNG TIN CƠ BẢN (LUÔN HIỆN)
+            KHỐI 3: THÔNG TIN CƠ BẢN
         ========================================================================= */}
-        <section className="bg-surface-card rounded-xl p-6 border border-border-subtle shadow-card space-y-5">
-          <div className="flex items-center justify-between border-b border-border-subtle pb-3">
-            <div className="flex items-center gap-2">
-              <Package className="w-5 h-5 text-brand" />
-              <h2 className="text-base font-semibold text-text-main">
-                1. Thông tin cơ bản
-              </h2>
-            </div>
-            <span className="text-xs text-brand font-medium bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-              Bắt buộc
-            </span>
+        <section className="bg-surface-card rounded-xl p-5 sm:p-6 border border-border-default shadow-xs space-y-4">
+          <div className="border-b border-border-subtle pb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-text-main">
+              3. Thông tin định danh & Cấu hình ĐVT
+            </h2>
+            <Badge variant="default">Cơ sở dữ liệu</Badge>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Product Name */}
+            {/* Tên sản phẩm */}
             <div className="md:col-span-2">
               <label className="block text-xs font-semibold text-text-main mb-1">
                 Tên sản phẩm <span className="text-rose-500">*</span>
@@ -498,15 +1004,15 @@ export default function NewProductPage() {
               <input
                 type="text"
                 required
-                placeholder="Ví dụ: Áo Thun Polo Cotton, Cá Hồi Tươi Nguyên Con, Bánh Mì Đặc Biệt..."
+                placeholder="Ví dụ: Bia Heineken Lon 330ml, Áo Thun Polo Cotton, Trà Sữa Trân Châu Đường Đen..."
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onBlur={handleNameBlur}
-                className="w-full px-3.5 py-2.5 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main"
+                className="w-full px-3.5 py-2 text-sm bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main font-medium"
               />
             </div>
 
-            {/* Product Code / SKU */}
+            {/* Mã sản phẩm */}
             <div>
               <label className="block text-xs font-semibold text-text-main mb-1">
                 Mã sản phẩm / SKU <span className="text-rose-500">*</span>
@@ -514,28 +1020,28 @@ export default function NewProductPage() {
               <input
                 type="text"
                 required
-                placeholder="Ví dụ: AT-POLO, CA-HOI-01"
+                placeholder="Ví dụ: BIA-HEINEKEN, AT-POLO, TRA-SUA"
                 value={code}
                 onChange={(e) => setCode(e.target.value.toUpperCase())}
-                className="w-full px-3.5 py-2.5 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
+                className="w-full px-3.5 py-2 text-sm bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
               />
             </div>
 
-            {/* Barcode */}
+            {/* Barcode gốc */}
             <div>
               <label className="block text-xs font-semibold text-text-main mb-1">
-                Mã vạch Barcode
+                Mã vạch Barcode (Đơn vị gốc)
               </label>
               <input
                 type="text"
-                placeholder="Nhập hoặc quét mã vạch (e.g. 893...)"
+                placeholder="893000000001 (Quét hoặc tự gõ)"
                 value={barcode}
                 onChange={(e) => setBarcode(e.target.value.trim())}
-                className="w-full px-3.5 py-2.5 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
+                className="w-full px-3.5 py-2 text-sm bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
               />
             </div>
 
-            {/* Category */}
+            {/* Danh mục (SearchableSelect phân cấp + Tạo nhanh inline) */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-semibold text-text-main">
@@ -543,111 +1049,108 @@ export default function NewProductPage() {
                 </label>
                 <button
                   type="button"
-                  onClick={() => setIsAddingNewCat(!isAddingNewCat)}
-                  className="text-xs text-brand hover:underline font-medium"
+                  onClick={() => setIsCategoryModalOpen(true)}
+                  className="text-xs text-brand hover:underline font-semibold"
                 >
-                  {isAddingNewCat ? "Chọn danh mục có sẵn" : "+ Nhập danh mục mới"}
+                  + Tạo nhanh danh mục
                 </button>
               </div>
 
-              {isAddingNewCat ? (
-                <input
-                  type="text"
-                  placeholder="Nhập tên danh mục mới..."
-                  value={newCatName}
-                  onChange={(e) => setNewCatName(e.target.value)}
-                  className="w-full px-3.5 py-2.5 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main"
-                />
-              ) : (
-                <select
-                  value={categoryId}
-                  onChange={(e) => setCategoryId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main"
-                >
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                  {categories.length === 0 && (
-                    <option value="">(Tự động tạo danh mục Mặc định)</option>
-                  )}
-                </select>
-              )}
+              <SearchableSelect
+                options={categoryOptions}
+                value={categoryId}
+                onChange={setCategoryId}
+                onCreate={async (query) => {
+                  const created = await api.createCategory({ name: query });
+                  setCategories((prev) => [...prev, created]);
+                  setCategoryId(created.id);
+                }}
+                createLabel="Tạo danh mục mới"
+                placeholder="Chọn danh mục..."
+              />
             </div>
 
-            {/* Base UOM */}
+            {/* Đơn vị tính cơ sở (SearchableSelect + Tạo nhanh inline) */}
             <div>
-              <label className="block text-xs font-semibold text-text-main mb-1">
-                Đơn vị tính cơ sở (ĐVT chuẩn) <span className="text-rose-500">*</span>
-              </label>
-              <div className="flex gap-2">
-                <select
-                  value={baseUom}
-                  onChange={(e) => handleBaseUomChange(e.target.value)}
-                  className="w-full px-3.5 py-2.5 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-text-main">
+                  Đơn vị tính cơ sở <span className="text-rose-500">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsUnitModalOpen(true)}
+                  className="text-xs text-brand hover:underline font-semibold"
                 >
-                  {units.length > 0
-                    ? units.map((u) => (
-                        <option key={u.id} value={u.name.toLowerCase()}>
-                          {u.name} ({u.code})
-                        </option>
-                      ))
-                    : COMMON_UOMS.map((u) => (
-                        <option key={u} value={u}>
-                          {u}
-                        </option>
-                      ))}
-                  <option value="KHAC">Khác (tự gõ)...</option>
-                </select>
-                {baseUom === "KHAC" && (
-                  <input
-                    type="text"
-                    required
-                    placeholder="Nhập ĐVT..."
-                    value={customUom}
-                    onChange={(e) => setCustomUom(e.target.value)}
-                    className="w-32 px-3 py-2 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
-                  />
-                )}
+                  + Tạo nhanh ĐVT
+                </button>
               </div>
+
+              <SearchableSelect
+                options={unitOptions.length > 0 ? unitOptions : COMMON_UOMS.map((u) => ({ value: u, label: u }))}
+                value={baseUom}
+                onChange={handleBaseUomChange}
+                onCreate={async (query) => {
+                  const created = await api.createUnit({ name: query });
+                  setUnits((prev) => [...prev, created]);
+                  handleBaseUomChange(created.name.toLowerCase());
+                }}
+                createLabel="Tạo ĐVT mới"
+                placeholder="Chọn ĐVT cơ sở..."
+              />
             </div>
 
-            {/* Product Type */}
+            {/* Hạn sử dụng mặc định & Cảnh báo cận date */}
             <div>
               <label className="block text-xs font-semibold text-text-main mb-1">
-                Loại hàng hóa (Product Type)
+                Hạn sử dụng mặc định (Số ngày)
               </label>
-              <select
-                value={productType}
-                onChange={(e) => setProductType(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main"
-              >
-                {PRODUCT_TYPES.map((pt) => (
-                  <option key={pt.value} value={pt.value}>
-                    {pt.label}
-                  </option>
-                ))}
-              </select>
+              <input
+                type="number"
+                min="0"
+                placeholder="VD: 30 (Tự tính HSD khi nhập hàng)"
+                value={shelfLifeDays !== null ? shelfLifeDays : ""}
+                onChange={(e) =>
+                  setShelfLifeDays(e.target.value ? Number(e.target.value) : null)
+                }
+                className="w-full px-3.5 py-2 text-sm bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
+              />
             </div>
 
-            {/* Product Image Upload */}
+            <div>
+              <label className="block text-xs font-semibold text-text-main mb-1">
+                Cảnh báo cận date trước (Số ngày)
+              </label>
+              <input
+                type="number"
+                min="0"
+                placeholder="VD: 7 (Cảnh báo trước 7 ngày)"
+                value={expiryWarningDays !== null ? expiryWarningDays : ""}
+                onChange={(e) =>
+                  setExpiryWarningDays(
+                    e.target.value ? Number(e.target.value) : null
+                  )
+                }
+                className="w-full px-3.5 py-2 text-sm bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
+              />
+            </div>
+
+            {/* Ảnh đại diện */}
             <div className="md:col-span-2 pt-2 border-t border-border-subtle">
               <ImageUploader
                 value={imageUrl}
                 onChange={setImageUrl}
                 onRemove={() => setImageUrl("")}
-                label="Ảnh sản phẩm (MinIO Object Storage)"
+                label="Ảnh đại diện sản phẩm"
               />
             </div>
           </div>
 
-          {/* Pricing & Stock inputs for non-matrix products */}
-          {(!isModuleEnabled("matrix_variants") || !useMatrix) && (
-            <div className="pt-4 mt-2 border-t border-border-subtle space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-text-sub">
-                Định giá & Tồn kho ban đầu (Sản phẩm đơn thể)
-              </h3>
+          {/* Pricing & Stock inputs for non-matrix, non-fnb size products */}
+          {archetype !== "MATRIX" && (archetype !== "MANUFACTURED" || !hasSizes) && (
+            <div className="pt-4 border-t border-border-subtle space-y-3">
+              <span className="text-xs font-semibold uppercase tracking-wider text-text-sub block">
+                Định giá & Tồn kho ban đầu ({baseUom})
+              </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-text-sub mb-1">
@@ -659,17 +1162,13 @@ export default function NewProductPage() {
                     step="500"
                     value={baseSellingPrice || ""}
                     onChange={(e) => setBaseSellingPrice(Number(e.target.value))}
-                    placeholder="0"
-                    className="w-full px-3 py-2 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
+                    className="w-full px-3 py-2 text-sm bg-surface-app border border-border-default rounded-lg text-right font-mono font-semibold text-brand"
                   />
-                  <div className="text-[11px] text-text-sub mt-0.5">
-                    {formatVND(baseSellingPrice)}
-                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-text-sub mb-1">
-                    Giá vốn ban đầu / WAC (VND)
+                    Giá vốn ban đầu WAC (VND)
                   </label>
                   <input
                     type="number"
@@ -677,17 +1176,13 @@ export default function NewProductPage() {
                     step="500"
                     value={costPrice || ""}
                     onChange={(e) => setCostPrice(Number(e.target.value))}
-                    placeholder="0"
-                    className="w-full px-3 py-2 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
+                    className="w-full px-3 py-2 text-sm bg-surface-app border border-border-default rounded-lg text-right font-mono text-text-main"
                   />
-                  <div className="text-[11px] text-text-sub mt-0.5">
-                    {formatVND(costPrice)}
-                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-text-sub mb-1">
-                    Giá sàn bán lẻ (Min Price)
+                    Giá sàn tối thiểu (VND)
                   </label>
                   <input
                     type="number"
@@ -695,30 +1190,22 @@ export default function NewProductPage() {
                     step="500"
                     value={minSellingPrice || ""}
                     onChange={(e) => setMinSellingPrice(Number(e.target.value))}
-                    placeholder="0"
-                    className="w-full px-3 py-2 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
+                    className="w-full px-3 py-2 text-sm bg-surface-app border border-border-default rounded-lg text-right font-mono text-rose-600"
                   />
-                  <div className="text-[11px] text-text-sub mt-0.5">
-                    {formatVND(minSellingPrice)}
-                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-text-sub mb-1">
-                    Tồn kho ban đầu
+                    Số lượng tồn ban đầu
                   </label>
                   <input
                     type="number"
                     min="0"
-                    step="0.01"
+                    step="1"
                     value={initialStock || ""}
                     onChange={(e) => setInitialStock(Number(e.target.value))}
-                    placeholder="0"
-                    className="w-full px-3 py-2 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main font-mono"
+                    className="w-full px-3 py-2 text-sm bg-surface-app border border-border-default rounded-lg text-right font-mono font-bold text-text-main"
                   />
-                  <div className="text-[11px] text-text-sub mt-0.5">
-                    Số lượng theo ĐVT: {baseUom}
-                  </div>
                 </div>
               </div>
             </div>
@@ -726,519 +1213,1004 @@ export default function NewProductPage() {
         </section>
 
         {/* =========================================================================
-            KHỐI 2: MA TRẬN BIẾN THỂ (CHỈ HIỆN KHI matrix_variants = true)
+            KHỐI 4 (CHUYÊN NGÀNH): CHỈ HIỂN THỊ ĐÚNG 1 KHỐI THEO ARCHETYPE
         ========================================================================= */}
-        {isModuleEnabled("matrix_variants") && (
-          <section className="bg-surface-card rounded-xl p-6 border border-purple-200 shadow-card space-y-5">
+
+        {/* NHÓM 1: ĐA ĐƠN VỊ TÍNH (STANDARD) */}
+        {archetype === "STANDARD" && (
+          <section className="bg-surface-card rounded-xl p-5 sm:p-6 border border-emerald-300 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-border-subtle pb-3">
               <div className="flex items-center gap-2">
-                <Layers className="w-5 h-5 text-purple-600" />
+                <Package className="w-5 h-5 text-brand" />
                 <div>
-                  <h2 className="text-base font-semibold text-text-main flex items-center gap-2">
-                    2. Ma trận Biến thể (Màu sắc × Kích cỡ)
-                    <Badge variant="matrix">Mô-đun Thời trang</Badge>
+                  <h2 className="text-sm font-semibold text-text-main">
+                    4. Bảng quy đổi Đa Đơn Vị Tính & Barcode riêng
                   </h2>
                   <p className="text-xs text-text-sub mt-0.5">
-                    Tự động tính tích Descartes và sinh tổ hợp SKU đa thuộc tính.
+                    Hỗ trợ quét barcode thùng, lốc, lon tại POS với giá bán riêng từng quy cách.
                   </p>
                 </div>
               </div>
-
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={useMatrix}
-                  onChange={(e) => setUseMatrix(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                <span className="ml-2 text-xs font-semibold text-text-main">
-                  {useMatrix ? "Đang bật" : "Tắt ma trận"}
-                </span>
-              </label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleApplySuggestedConversions}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-brand bg-brand/10 px-3 py-1.5 rounded-lg border border-brand/20 hover:bg-brand/20 transition"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  <span>Gợi ý quy đổi &quot;{baseUom}&quot;</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddConversion}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-white bg-brand px-3 py-1.5 rounded-lg hover:bg-brand-hover transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Thêm đơn vị</span>
+                </button>
+              </div>
             </div>
 
-            {useMatrix && (
-              <div className="space-y-4">
-                {/* Attribute Definition Rows */}
-                <div className="space-y-2.5">
-                  <div className="text-xs font-semibold text-text-sub uppercase tracking-wider">
-                    Danh sách Thuộc tính & Giá trị (phân cách bằng dấu phẩy)
-                  </div>
+            {conversions.length === 0 ? (
+              <div className="text-xs text-text-sub italic bg-surface-app p-4 rounded-lg border border-dashed border-border-default text-center space-y-2">
+                <p>
+                  Sản phẩm hiện bán theo đơn vị gốc &quot;{baseUom}&quot;. Bấm &quot;Thêm đơn vị&quot; nếu bán thêm theo Thùng, Lốc hoặc Hộp.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {conversions.map((row, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 bg-surface-app rounded-lg border border-border-default grid grid-cols-1 sm:grid-cols-12 gap-3 items-center"
+                  >
+                    <div className="sm:col-span-3">
+                      <label className="block text-[11px] font-semibold text-text-sub mb-0.5">
+                        Tên ĐVT phụ
+                      </label>
+                      <SearchableSelect
+                        options={unitOptions.length > 0 ? unitOptions : COMMON_UOMS.map((u) => ({ value: u, label: u }))}
+                        value={row.uom_name}
+                        onChange={(val) => handleConversionChange(idx, "uom_name", val)}
+                        onCreate={async (query) => {
+                          const created = await api.createUnit({ name: query });
+                          setUnits((prev) => [...prev, created]);
+                          handleConversionChange(idx, "uom_name", created.name.toLowerCase());
+                        }}
+                        createLabel="Tạo ĐVT mới"
+                        placeholder="Chọn hoặc tạo ĐVT..."
+                      />
+                    </div>
 
-                  {attributes.map((attr, idx) => (
-                    <div key={idx} className="flex items-center gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] font-semibold text-text-sub mb-0.5">
+                        Hệ số quy đổi ({baseUom})
+                      </label>
+                      <input
+                        type="number"
+                        step="0.001"
+                        min="0.0001"
+                        placeholder="24"
+                        value={row.conversion_factor}
+                        onChange={(e) =>
+                          handleConversionChange(
+                            idx,
+                            "conversion_factor",
+                            Number(e.target.value)
+                          )
+                        }
+                        className="w-full px-2.5 py-1.5 text-xs bg-surface-card border border-border-default rounded font-mono text-right text-text-main"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-3">
+                      <label className="block text-[11px] font-semibold text-text-sub mb-0.5">
+                        Mã vạch Barcode riêng
+                      </label>
                       <input
                         type="text"
-                        placeholder="Tên thuộc tính (e.g. Màu sắc, Kích cỡ)"
-                        value={attr.name}
-                        onChange={(e) => handleAttributeChange(idx, "name", e.target.value)}
-                        className="w-1/3 px-3 py-2 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main"
+                        placeholder="893000000024"
+                        value={row.barcode || ""}
+                        onChange={(e) =>
+                          handleConversionChange(idx, "barcode", e.target.value)
+                        }
+                        className="w-full px-2.5 py-1.5 text-xs bg-surface-card border border-border-default rounded font-mono text-text-main"
                       />
+                    </div>
+
+                    <div className="sm:col-span-3">
+                      <label className="block text-[11px] font-semibold text-text-sub mb-0.5">
+                        Giá bán ĐVT này (VND)
+                      </label>
                       <input
-                        type="text"
-                        placeholder="Các giá trị (e.g. Đỏ, Đen, Trắng hoặc S, M, L, XL)"
-                        value={attr.valuesStr}
-                        onChange={(e) => handleAttributeChange(idx, "valuesStr", e.target.value)}
-                        className="flex-1 px-3 py-2 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main"
+                        type="number"
+                        step="500"
+                        min="0"
+                        placeholder="VD: 240.000"
+                        value={row.selling_price || ""}
+                        onChange={(e) =>
+                          handleConversionChange(
+                            idx,
+                            "selling_price",
+                            e.target.value ? Number(e.target.value) : undefined
+                          )
+                        }
+                        className="w-full px-2.5 py-1.5 text-xs bg-surface-card border border-border-default rounded font-mono text-right text-brand font-semibold"
                       />
+                    </div>
+
+                    <div className="sm:col-span-1 text-center">
                       <button
                         type="button"
-                        onClick={() => handleRemoveAttribute(idx)}
-                        disabled={attributes.length <= 1}
-                        className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition disabled:opacity-30"
-                        title="Xóa thuộc tính này"
+                        onClick={() => handleRemoveConversion(idx)}
+                        className="text-text-disabled hover:text-rose-600 p-1 rounded"
+                        title="Xóa ĐVT này"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
-                  ))}
-
-                  <div className="flex items-center justify-between pt-1">
-                    <button
-                      type="button"
-                      onClick={handleAddAttribute}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-700 bg-purple-50 px-3 py-1.5 rounded-lg border border-purple-200 hover:bg-purple-100 transition"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Thêm thuộc tính</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleGenerateMatrix}
-                      className="inline-flex items-center gap-2 text-xs font-semibold text-white bg-purple-600 px-4 py-2 rounded-lg hover:bg-purple-700 shadow-sm transition"
-                    >
-                      <Wand2 className="w-3.5 h-3.5" />
-                      <span>Sinh ma trận SKU (Descartes)</span>
-                    </button>
                   </div>
-                </div>
-
-                {/* Generated Variants Table */}
-                {generatedVariants.length > 0 && (
-                  <div className="pt-3 border-t border-border-subtle space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs font-semibold text-purple-900 flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                        <span>Danh sách biến thể đã sinh ({generatedVariants.length} SKU)</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleApplyBulkPrices}
-                        className="text-xs text-purple-700 hover:underline font-medium"
-                        title="Gán giá bán, giá vốn, giá sàn mặc định cho tất cả các dòng"
-                      >
-                        Đồng bộ nhanh giá chung vào tất cả dòng
-                      </button>
-                    </div>
-
-                    <div className="overflow-x-auto rounded-lg border border-border-subtle">
-                      <table className="w-full text-xs">
-                        <thead className="bg-purple-50/70 text-purple-900 font-semibold border-b border-border-subtle">
-                          <tr>
-                            <th className="py-2.5 px-3 text-left">Mã SKU</th>
-                            <th className="py-2.5 px-3 text-left">Tên quy cách</th>
-                            <th className="py-2.5 px-3 text-right w-28">Giá bán</th>
-                            <th className="py-2.5 px-3 text-right w-28">Giá vốn WAC</th>
-                            <th className="py-2.5 px-3 text-right w-28">Giá sàn</th>
-                            <th className="py-2.5 px-3 text-right w-24">Tồn đầu</th>
-                            <th className="py-2.5 px-2 text-center w-10"></th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border-subtle bg-white">
-                          {generatedVariants.map((v, i) => (
-                            <tr key={i} className="hover:bg-purple-50/20">
-                              <td className="py-2 px-3">
-                                <input
-                                  type="text"
-                                  value={v.sku}
-                                  onChange={(e) => handleUpdateVariant(i, "sku", e.target.value)}
-                                  className="w-full px-2 py-1 text-xs bg-slate-50 border border-border-subtle rounded font-mono font-medium"
-                                />
-                              </td>
-                              <td className="py-2 px-3">
-                                <input
-                                  type="text"
-                                  value={v.variant_name}
-                                  onChange={(e) => handleUpdateVariant(i, "variant_name", e.target.value)}
-                                  className="w-full px-2 py-1 text-xs bg-slate-50 border border-border-subtle rounded"
-                                />
-                              </td>
-                              <td className="py-2 px-3">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="500"
-                                  value={v.base_selling_price}
-                                  onChange={(e) => handleUpdateVariant(i, "base_selling_price", Number(e.target.value))}
-                                  className="w-full px-2 py-1 text-xs bg-slate-50 border border-border-subtle rounded text-right font-mono"
-                                />
-                              </td>
-                              <td className="py-2 px-3">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="500"
-                                  value={v.cost_price}
-                                  onChange={(e) => handleUpdateVariant(i, "cost_price", Number(e.target.value))}
-                                  className="w-full px-2 py-1 text-xs bg-slate-50 border border-border-subtle rounded text-right font-mono"
-                                />
-                              </td>
-                              <td className="py-2 px-3">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="500"
-                                  value={v.min_selling_price}
-                                  onChange={(e) => handleUpdateVariant(i, "min_selling_price", Number(e.target.value))}
-                                  className="w-full px-2 py-1 text-xs bg-slate-50 border border-border-subtle rounded text-right font-mono"
-                                />
-                              </td>
-                              <td className="py-2 px-3">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  value={v.current_stock}
-                                  onChange={(e) => handleUpdateVariant(i, "current_stock", Number(e.target.value))}
-                                  className="w-full px-2 py-1 text-xs bg-slate-50 border border-border-subtle rounded text-right font-mono"
-                                />
-                              </td>
-                              <td className="py-2 px-2 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveVariant(i)}
-                                  className="text-slate-400 hover:text-rose-500 p-1"
-                                  title="Xóa dòng này"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
+                ))}
               </div>
             )}
           </section>
         )}
 
-        {/* =========================================================================
-            KHỐI 3: CÂN ĐIỆN TỬ & ĐƠN VỊ TÍNH QUY ĐỔI
-        ========================================================================= */}
-        {(isModuleEnabled("catch_weight") || showConversionsSection || conversions.length > 0) ? (
-          <section className="bg-surface-card rounded-xl p-6 border border-cyan-200 shadow-card space-y-4">
+        {/* NHÓM 2: MA TRẬN MÀU × SIZE (MATRIX) */}
+        {archetype === "MATRIX" && (
+          <section className="bg-surface-card rounded-xl p-5 sm:p-6 border border-purple-300 shadow-xs space-y-4">
             <div className="flex items-center justify-between border-b border-border-subtle pb-3">
               <div className="flex items-center gap-2">
-                <Scale className="w-5 h-5 text-cyan-600" />
+                <Layers className="w-5 h-5 text-purple-600" />
                 <div>
-                  <h2 className="text-base font-semibold text-text-main flex items-center gap-2">
-                    3. Đơn vị tính quy đổi & Bán theo quy cách
-                    {isModuleEnabled("catch_weight") && (
-                      <Badge variant="catchweight">Hải sản / Cân ký</Badge>
-                    )}
+                  <h2 className="text-sm font-semibold text-text-main">
+                    4. Ma trận thuộc tính Màu sắc × Kích cỡ & Ảnh từng SKU
                   </h2>
                   <p className="text-xs text-text-sub mt-0.5">
-                    Hỗ trợ bán theo thùng, lon, chai hoặc con với hệ số quy đổi hoặc cân thực tế tại quầy POS.
+                    Tổ hợp thuộc tính để tự động tạo danh sách SKU bán lẻ thời trang kèm ảnh và HSD riêng.
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Weighable Checkbox */}
-            {isModuleEnabled("catch_weight") && (
-              <div className="p-3.5 bg-cyan-50/50 rounded-lg border border-cyan-100 flex items-center gap-3">
+            <div className="space-y-3">
+              {attributes.map((attr, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-3 p-3 bg-surface-app rounded-lg border border-border-default"
+                >
+                  <div className="w-1/3">
+                    <label className="block text-[11px] font-semibold text-text-sub mb-1">
+                      Tên thuộc tính
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Màu sắc, Size..."
+                      value={attr.name}
+                      onChange={(e) =>
+                        handleAttributeChange(idx, "name", e.target.value)
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs bg-surface-card border border-border-default rounded font-medium"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[11px] font-semibold text-text-sub mb-1">
+                      Các giá trị (phân tách bằng dấu phẩy)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Đỏ, Đen, Trắng hoặc S, M, L, XL"
+                      value={attr.valuesStr}
+                      onChange={(e) =>
+                        handleAttributeChange(idx, "valuesStr", e.target.value)
+                      }
+                      className="w-full px-2.5 py-1.5 text-xs bg-surface-card border border-border-default rounded"
+                    />
+                  </div>
+                  {attributes.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttribute(idx)}
+                      className="text-text-disabled hover:text-rose-600 p-1 mt-4"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              <div className="flex items-center justify-between pt-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleAddAttribute}
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  <span>Thêm thuộc tính</span>
+                </Button>
+
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleGenerateMatrix}
+                  className="bg-purple-600 hover:bg-purple-700 text-white"
+                >
+                  <Wand2 className="w-3.5 h-3.5 mr-1" />
+                  <span>Sinh danh sách SKU</span>
+                </Button>
+              </div>
+
+              {generatedVariants.length > 0 && (
+                <div className="pt-3 border-t border-border-subtle space-y-3">
+                  <div className="flex items-center justify-between text-xs font-semibold text-purple-900">
+                    <span>Đã sinh {generatedVariants.length} SKU biến thể</span>
+                    <button
+                      type="button"
+                      onClick={handleApplyBulkPrices}
+                      className="text-purple-700 hover:underline"
+                    >
+                      Đồng bộ giá chung cho tất cả
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto border border-border-default rounded">
+                    <table className="w-full text-xs">
+                      <thead className="bg-purple-50 text-purple-950 font-semibold border-b border-border-default">
+                        <tr>
+                          <th className="py-2.5 px-3 text-left w-16">Ảnh</th>
+                          <th className="py-2.5 px-3 text-left">Mã SKU</th>
+                          <th className="py-2.5 px-3 text-left">Quy cách</th>
+                          <th className="py-2.5 px-3 text-right w-28">Giá bán</th>
+                          <th className="py-2.5 px-3 text-right w-28">Giá vốn</th>
+                          <th className="py-2.5 px-3 text-right w-24">Tồn đầu</th>
+                          <th className="py-2.5 px-2 text-center w-10"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border-default bg-surface-card">
+                        {generatedVariants.map((v, i) => (
+                          <tr key={i}>
+                            <td className="py-2 px-3">
+                              {v.image_url ? (
+                                <div className="relative w-8 h-8 rounded border border-border-default overflow-hidden group">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={v.image_url}
+                                    alt="thumb"
+                                    className="w-full h-full object-cover"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateVariant(i, "image_url", "")}
+                                    className="absolute inset-0 bg-black/60 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px]"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ) : (
+                                <label className="w-8 h-8 rounded border border-dashed border-border-default hover:border-brand flex items-center justify-center cursor-pointer text-text-sub hover:text-brand">
+                                  <ImageIcon className="w-3.5 h-3.5" />
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={async (e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        try {
+                                          const up = await api.uploadFile(file);
+                                          handleUpdateVariant(i, "image_url", up.file_url);
+                                        } catch {}
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 font-mono font-bold text-text-main">
+                              <input
+                                type="text"
+                                value={v.sku}
+                                onChange={(e) =>
+                                  handleUpdateVariant(i, "sku", e.target.value)
+                                }
+                                className="w-full px-2 py-1 bg-surface-app border border-border-default rounded font-mono text-xs"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-text-main">
+                              {v.variant_name}
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <input
+                                type="number"
+                                min="0"
+                                step="500"
+                                value={v.base_selling_price}
+                                onChange={(e) =>
+                                  handleUpdateVariant(
+                                    i,
+                                    "base_selling_price",
+                                    Number(e.target.value)
+                                  )
+                                }
+                                className="w-full px-2 py-1 bg-surface-app border border-border-default rounded text-right font-mono text-brand font-semibold text-xs"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <input
+                                type="number"
+                                min="0"
+                                step="500"
+                                value={v.cost_price}
+                                onChange={(e) =>
+                                  handleUpdateVariant(
+                                    i,
+                                    "cost_price",
+                                    Number(e.target.value)
+                                  )
+                                }
+                                className="w-full px-2 py-1 bg-surface-app border border-border-default rounded text-right font-mono text-xs"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={v.current_stock}
+                                onChange={(e) =>
+                                  handleUpdateVariant(
+                                    i,
+                                    "current_stock",
+                                    Number(e.target.value)
+                                  )
+                                }
+                                className="w-full px-2 py-1 bg-surface-app border border-border-default rounded text-right font-mono text-xs"
+                              />
+                            </td>
+                            <td className="py-2 px-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveVariant(i)}
+                                className="text-text-disabled hover:text-rose-600 p-1"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* NHÓM 3: HÀNG TƯƠI SỐNG / CÂN KÝ (CATCH_WEIGHT) */}
+        {archetype === "CATCH_WEIGHT" && (
+          <section className="bg-surface-card rounded-xl p-5 sm:p-6 border border-cyan-300 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-border-subtle pb-3">
+              <div className="flex items-center gap-2">
+                <Scale className="w-5 h-5 text-cyan-600" />
+                <div>
+                  <h2 className="text-sm font-semibold text-text-main">
+                    4. Cân điện tử & Quản lý Lô / Hạn sử dụng
+                  </h2>
+                  <p className="text-xs text-text-sub mt-0.5">
+                    Hàng hóa tươi sống (cá, thịt, tôm) cần nhập trọng lượng thực tế tại POS và theo dõi cận date.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <label className="flex items-start gap-2.5 p-3.5 bg-surface-app rounded-lg border border-border-default cursor-pointer">
                 <input
                   type="checkbox"
-                  id="is_weighable_cb"
                   checked={isWeighable}
                   onChange={(e) => setIsWeighable(e.target.checked)}
-                  className="w-4 h-4 text-cyan-600 rounded border-slate-300 focus:ring-cyan-500"
+                  className="mt-0.5 rounded text-cyan-600 focus:ring-cyan-500"
                 />
-                <label htmlFor="is_weighable_cb" className="text-sm font-medium text-text-main cursor-pointer">
-                  Hàng cần cân thực tế tại quầy (<span className="font-mono text-cyan-700">is_weighable</span>)
-                </label>
-              </div>
-            )}
+                <div>
+                  <span className="text-xs font-bold text-text-main block">
+                    Bắt buộc cân ký thực tế tại quầy POS
+                  </span>
+                  <span className="text-[11px] text-text-sub block mt-0.5">
+                    Khi thu ngân quét sản phẩm, màn hình POS sẽ bật cửa sổ cân trọng lượng (kg).
+                  </span>
+                </div>
+              </label>
 
-            {/* UOM Conversions Table */}
-            <div className="space-y-3 pt-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-text-sub uppercase tracking-wider">
-                  Bảng quy đổi Đơn vị phụ (Con, Thùng, Khay, Lon, Hộp...)
-                </span>
-                <div className="flex items-center gap-2">
+              <label className="flex items-start gap-2.5 p-3.5 bg-surface-app rounded-lg border border-border-default cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={trackBatches}
+                  onChange={(e) => setTrackBatches(e.target.checked)}
+                  className="mt-0.5 rounded text-cyan-600 focus:ring-cyan-500"
+                />
+                <div>
+                  <span className="text-xs font-bold text-text-main block">
+                    Theo dõi Số lô & Hạn sử dụng (Batch/Expiry)
+                  </span>
+                  <span className="text-[11px] text-text-sub block mt-0.5">
+                    Theo dõi ngày đánh bắt, hạn dùng ngắn ngày và tự động cảnh báo cận date.
+                  </span>
+                </div>
+              </label>
+            </div>
+          </section>
+        )}
+
+        {/* NHÓM 4: CHẾ BIẾN / F&B (MANUFACTURED) - SIZES & TOPPINGS */}
+        {archetype === "MANUFACTURED" && (
+          <section className="bg-surface-card rounded-xl p-5 sm:p-6 border border-indigo-300 shadow-xs space-y-5">
+            <div className="flex items-center justify-between border-b border-border-subtle pb-3">
+              <div className="flex items-center gap-2">
+                <Coffee className="w-5 h-5 text-indigo-600" />
+                <div>
+                  <h2 className="text-sm font-semibold text-text-main">
+                    4. Cấu hình F&B: Kích cỡ (Sizes) & Toppings (Chọn từ Sản phẩm)
+                  </h2>
+                  <p className="text-xs text-text-sub mt-0.5">
+                    Topping là sản phẩm nguyên liệu trong kho, tự động trừ kho nguyên liệu khi bán.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* 1. Sizes configuration */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-xs font-bold text-text-main">
+                  <input
+                    type="checkbox"
+                    checked={hasSizes}
+                    onChange={(e) => setHasSizes(e.target.checked)}
+                    className="rounded text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>Bán theo nhiều kích cỡ (Size S, M, L...)</span>
+                </label>
+                {hasSizes && (
                   <button
                     type="button"
-                    onClick={() => handleApplySuggestedConversions()}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-brand bg-brand/10 px-3 py-1.5 rounded-lg border border-brand/20 hover:bg-brand/20 transition"
-                    title={`Gợi ý tự động cho đơn vị ${baseUom}`}
-                  >
-                    <ArrowRightLeft className="w-3.5 h-3.5" />
-                    <span>Gợi ý quy đổi cho &quot;{baseUom}&quot;</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleAddConversion}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-700 bg-cyan-50 px-3 py-1.5 rounded-lg border border-cyan-200 hover:bg-cyan-100 transition"
+                    onClick={handleAddFnbSize}
+                    className="inline-flex items-center gap-1 text-xs text-indigo-600 font-semibold hover:underline"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Thêm đơn vị quy đổi</span>
+                    <span>Thêm Size</span>
                   </button>
-                </div>
+                )}
               </div>
 
-              {conversions.length === 0 ? (
-                <div className="text-xs text-text-sub italic bg-surface-muted/40 p-4 rounded-lg border border-dashed border-border-subtle text-center space-y-2">
-                  <p>Chưa có đơn vị phụ. Bấm &quot;Gợi ý quy đổi&quot; hoặc &quot;Thêm đơn vị quy đổi&quot; nếu sản phẩm bán theo Thùng, Lon, Hộp hoặc Con.</p>
-                </div>
-              ) : (
+              {hasSizes && (
                 <div className="space-y-2">
-                  <datalist id="uom-options">
-                    {units.map((u) => (
-                      <option key={u.id} value={u.name.toLowerCase()}>
-                        {u.name} ({u.code})
-                      </option>
-                    ))}
-                    {COMMON_UOMS.map((u) => (
-                      <option key={u} value={u} />
-                    ))}
-                  </datalist>
-
-                  {conversions.map((row, idx) => (
+                  {fnbSizes.map((sz, idx) => (
                     <div
                       key={idx}
-                      className="p-3 bg-white rounded-lg border border-border-subtle grid grid-cols-1 sm:grid-cols-12 gap-3 items-center"
+                      className="flex items-center gap-3 p-2.5 bg-surface-app rounded-lg border border-border-default"
                     >
-                      <div className="sm:col-span-3">
-                        <label className="block text-[11px] font-medium text-text-sub mb-0.5">
-                          Tên đơn vị phụ
+                      <div className="flex-1">
+                        <label className="block text-[10px] text-text-sub mb-0.5 font-medium">
+                          Tên kích cỡ
                         </label>
                         <input
                           type="text"
-                          list="uom-options"
-                          placeholder="Ví dụ: Con, Thùng, Lon"
-                          value={row.uom_name}
-                          onChange={(e) => handleConversionChange(idx, "uom_name", e.target.value)}
-                          className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-border-subtle rounded font-medium"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-3">
-                        <label className="block text-[11px] font-medium text-text-sub mb-0.5">
-                          Hệ số quy đổi ra {baseUom}
-                        </label>
-                        <input
-                          type="number"
-                          step="0.001"
-                          min="0.0001"
-                          placeholder="e.g. 24 hoặc 0.001"
-                          value={row.conversion_factor}
+                          placeholder="Size M, Size L..."
+                          value={sz.name}
                           onChange={(e) =>
-                            handleConversionChange(idx, "conversion_factor", Number(e.target.value))
+                            handleUpdateFnbSize(idx, "name", e.target.value)
                           }
-                          className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-border-subtle rounded font-mono text-right"
+                          className="w-full px-2.5 py-1 text-xs bg-surface-card border border-border-default rounded font-medium"
                         />
                       </div>
-
-                      <div className="sm:col-span-3">
-                        <label className="block text-[11px] font-medium text-text-sub mb-0.5">
-                          Giá bán theo đơn vị này (nếu có)
+                      <div className="w-36">
+                        <label className="block text-[10px] text-text-sub mb-0.5 font-medium">
+                          Giá bán (VND)
                         </label>
                         <input
                           type="number"
                           step="500"
-                          min="0"
-                          placeholder="Để trống nếu theo ĐVT gốc"
-                          value={row.default_price_for_uom || ""}
+                          value={sz.price}
                           onChange={(e) =>
-                            handleConversionChange(
-                              idx,
-                              "default_price_for_uom",
-                              e.target.value ? Number(e.target.value) : undefined
-                            )
+                            handleUpdateFnbSize(idx, "price", Number(e.target.value))
                           }
-                          className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-border-subtle rounded font-mono text-right"
+                          className="w-full px-2.5 py-1 text-xs bg-surface-card border border-border-default rounded text-right font-mono font-bold text-brand"
                         />
                       </div>
-
-                      <div className="sm:col-span-2 flex items-center pt-3 sm:pt-0">
-                        <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs font-medium text-cyan-900">
-                          <input
-                            type="checkbox"
-                            checked={row.is_variable_ratio}
-                            onChange={(e) =>
-                              handleConversionChange(idx, "is_variable_ratio", e.target.checked)
-                            }
-                            className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
-                          />
-                          <span>Tỷ lệ biến thiên</span>
+                      <div className="w-32">
+                        <label className="block text-[10px] text-text-sub mb-0.5 font-medium">
+                          Giá vốn ước tính
                         </label>
+                        <input
+                          type="number"
+                          step="500"
+                          value={sz.cost}
+                          onChange={(e) =>
+                            handleUpdateFnbSize(idx, "cost", Number(e.target.value))
+                          }
+                          className="w-full px-2.5 py-1 text-xs bg-surface-card border border-border-default rounded text-right font-mono text-text-sub"
+                        />
                       </div>
-
-                      <div className="sm:col-span-1 text-right">
+                      {fnbSizes.length > 1 && (
                         <button
                           type="button"
-                          onClick={() => handleRemoveConversion(idx)}
-                          className="text-slate-400 hover:text-rose-500 p-1.5 rounded hover:bg-rose-50 transition"
-                          title="Xóa đơn vị này"
+                          onClick={() => handleRemoveFnbSize(idx)}
+                          className="p-1 text-text-disabled hover:text-rose-600 mt-3"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
-                      </div>
+                      )}
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          </section>
-        ) : (
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => setShowConversionsSection(true)}
-              className="text-xs text-brand hover:underline font-medium flex items-center gap-1"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Thiết lập bảng quy đổi đơn vị phụ (Thùng, Lon, Hộp, v.v...)</span>
-            </button>
-          </div>
-        )}
 
-        {/* =========================================================================
-            KHỐI 4: CÔNG THỨC CHẾ BIẾN & ĐỊNH MỨC BOM (CHỈ HIỆN KHI bom_production = true)
-        ========================================================================= */}
-        {isModuleEnabled("bom_production") && (
-          <section className="bg-surface-card rounded-xl p-6 border border-indigo-200 shadow-card space-y-4">
-            <div className="flex items-center justify-between border-b border-border-subtle pb-3">
-              <div className="flex items-center gap-2">
-                <Factory className="w-5 h-5 text-indigo-600" />
+            {/* 2. Toppings / Modifiers (Chọn từ sản phẩm có sẵn + Tạo nhanh) */}
+            <div className="space-y-3 pt-3 border-t border-border-subtle">
+              <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-base font-semibold text-text-main flex items-center gap-2">
-                    4. Công thức Chế biến & Định mức BOM
-                    <Badge variant="bom">Mô-đun Sản xuất / F&B</Badge>
-                  </h2>
-                  <p className="text-xs text-text-sub mt-0.5">
-                    Lựa chọn chế độ cấu thành công thức định mức cho sản phẩm này.
+                  <h3 className="text-xs font-bold text-text-main">
+                    Đồ kèm / Toppings cho món này (Liên kết kho sản phẩm)
+                  </h3>
+                  <p className="text-[11px] text-text-sub">
+                    Chọn từ sản phẩm nguyên vật liệu có sẵn, hoặc tạo nhanh nguyên liệu mới để tự trừ kho.
                   </p>
                 </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsToppingModalOpen(true)}
+                    className="inline-flex items-center gap-1 text-xs text-brand font-bold hover:underline"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Tạo mới nguyên liệu Topping</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick selector from existing catalog */}
+              <div className="flex items-center gap-2 p-2.5 bg-indigo-50/50 rounded-lg border border-indigo-200">
+                <span className="text-xs font-semibold text-indigo-900 shrink-0">
+                  Thêm từ danh mục:
+                </span>
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleAddFnbModifierFromExisting(e.target.value);
+                      e.target.value = "";
+                    }
+                  }}
+                  className="flex-1 px-2.5 py-1 text-xs bg-white border border-indigo-300 rounded focus:outline-none focus:border-indigo-500 font-medium text-text-main"
+                >
+                  <option value="">-- Chọn sản phẩm làm topping (Đồ ăn, thức uống, nguyên liệu) --</option>
+                  {eligibleToppingProducts.map((p) =>
+                    (p.variants || []).map((v) => (
+                      <option key={v.id} value={v.id}>
+                        [{p.product_type === "RAW_MATERIAL" ? "Nguyên liệu" : "Món"}] {p.name}{" "}
+                        {v.variant_name !== p.name ? `(${v.variant_name})` : ""} - Bán: {formatVND(Number(v.base_selling_price || 0))}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              {/* Toppings Table */}
+              {fnbModifiers.length > 0 && (
+                <div className="space-y-2">
+                  {fnbModifiers.map((mod, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center gap-3 p-2.5 bg-surface-app rounded-lg border border-border-default"
+                    >
+                      <div className="flex-1">
+                        <label className="block text-[10px] text-text-sub mb-0.5 font-medium">
+                          Tên món kèm
+                        </label>
+                        <input
+                          type="text"
+                          value={mod.name}
+                          onChange={(e) =>
+                            handleUpdateFnbModifier(idx, "name", e.target.value)
+                          }
+                          className="w-full px-2.5 py-1 text-xs bg-surface-card border border-border-default rounded font-medium"
+                        />
+                      </div>
+                      <div className="w-32">
+                        <label className="block text-[10px] text-text-sub mb-0.5 font-medium">
+                          Giá cộng thêm (VND)
+                        </label>
+                        <input
+                          type="number"
+                          step="500"
+                          value={mod.price}
+                          onChange={(e) =>
+                            handleUpdateFnbModifier(idx, "price", Number(e.target.value))
+                          }
+                          className="w-full px-2.5 py-1 text-xs bg-surface-card border border-border-default rounded text-right font-mono font-semibold text-brand"
+                        />
+                      </div>
+                      <div className="w-28">
+                        <label className="block text-[10px] text-text-sub mb-0.5 font-medium">
+                          Số lượng trừ kho
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.001"
+                          value={mod.deduct_qty ?? 1}
+                          onChange={(e) =>
+                            handleUpdateFnbModifier(idx, "deduct_qty", Number(e.target.value))
+                          }
+                          className="w-full px-2.5 py-1 text-xs bg-surface-card border border-border-default rounded text-right font-mono text-text-main"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFnbModifier(idx)}
+                        className="p-1 text-text-disabled hover:text-rose-600 mt-3"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 3. Production Mode */}
+            <div className="pt-3 border-t border-border-subtle space-y-2">
+              <label className="text-xs font-bold text-text-main block">
+                Chế độ Trừ kho & Sản xuất
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {PRODUCTION_MODES.map((mode) => (
+                  <label
+                    key={mode.value}
+                    className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                      productionMode === mode.value
+                        ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-500"
+                        : "border-border-default bg-surface-app hover:bg-surface-card"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <input
+                        type="radio"
+                        name="prod_mode"
+                        value={mode.value}
+                        checked={productionMode === mode.value}
+                        onChange={(e) => setProductionMode(e.target.value)}
+                        className="text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-xs font-bold text-text-main">
+                        {mode.label}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-text-sub pl-5 leading-relaxed">
+                      {mode.desc}
+                    </p>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* NHÓM 5: COMBO / GÓI SẢN PHẨM (COMBO) */}
+        {archetype === "COMBO" && (
+          <section className="bg-surface-card rounded-xl p-5 sm:p-6 border border-teal-300 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-border-subtle pb-3">
+              <div className="flex items-center gap-2">
+                <Boxes className="w-5 h-5 text-teal-600" />
+                <div>
+                  <h2 className="text-sm font-semibold text-text-main">
+                    4. Cấu hình Thành phần Gói Combo (Bundling)
+                  </h2>
+                  <p className="text-xs text-text-sub mt-0.5">
+                    Gói combo gồm nhiều sản phẩm con cấu thành. Khi bán tại POS, hệ thống tự động trừ kho từng món thành phần.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick add product to combo */}
+            <div className="flex flex-col sm:flex-row items-center gap-2 p-3 bg-teal-50/50 rounded-lg border border-teal-200">
+              <span className="text-xs font-semibold text-teal-900 shrink-0">
+                Thêm sản phẩm vào combo:
+              </span>
+              <div className="flex-1 w-full">
+                <SearchableSelect
+                  options={allProducts.flatMap((p) =>
+                    (p.variants || []).map((v) => ({
+                      value: v.id,
+                      label: `${p.name} ${v.variant_name && v.variant_name !== p.name ? `(${v.variant_name})` : ""}`,
+                      subLabel: `Mã: ${v.sku} - Giá vốn: ${formatVND(Number(v.cost_price || 0))} - Bán: ${formatVND(Number(v.base_selling_price || 0))}`,
+                      badge: p.base_uom,
+                    }))
+                  )}
+                  value=""
+                  onChange={(val) => handleAddComboComponent(val)}
+                  placeholder="Tìm và chọn sản phẩm thành phần..."
+                />
+              </div>
+            </div>
+
+            {/* Components table */}
+            {comboComponents.length === 0 ? (
+              <div className="text-xs text-text-sub italic bg-surface-app p-4 rounded-lg border border-dashed border-border-default text-center">
+                Chưa có mặt hàng nào trong combo. Chọn sản phẩm ở ô trên để thêm vào gói.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="border border-border-default rounded-lg overflow-x-auto">
+                  <table className="w-full text-xs min-w-[500px]">
+                    <thead className="bg-surface-app text-text-sub font-semibold border-b border-border-default">
+                      <tr>
+                        <th className="py-2 px-3 text-left">Sản phẩm thành phần</th>
+                        <th className="py-2 px-3 text-right w-24">Số lượng</th>
+                        <th className="py-2 px-3 text-right w-32">Giá vốn thành phần</th>
+                        <th className="py-2 px-3 text-right w-32">Giá lẻ thông thường</th>
+                        <th className="py-2 px-2 text-center w-10"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border-default bg-surface-card">
+                      {comboComponents.map((comp, idx) => (
+                        <tr key={comp.variant_id} className="hover:bg-surface-app/40">
+                          <td className="py-2 px-3 text-text-main">
+                            <div className="font-semibold">{comp.product_name}</div>
+                            {comp.variant_name !== comp.product_name && (
+                              <div className="text-[11px] text-text-sub">{comp.variant_name}</div>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <input
+                              type="number"
+                              min="0.01"
+                              step="1"
+                              value={comp.qty}
+                              onChange={(e) =>
+                                handleUpdateComboComponentQty(idx, Number(e.target.value))
+                              }
+                              className="w-16 px-2 py-1 text-xs bg-surface-app border border-border-default rounded text-right font-mono font-bold text-text-main"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-text-sub tabular-nums">
+                            {formatVND(comp.cost_price * comp.qty)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-text-main tabular-nums">
+                            {formatVND(comp.selling_price * comp.qty)}
+                          </td>
+                          <td className="py-2 px-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveComboComponent(idx)}
+                              className="p-1 text-text-disabled hover:text-rose-600 rounded"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Summary calculation */}
+                <div className="flex flex-wrap items-center justify-between gap-4 p-3 bg-surface-app rounded-lg border border-border-default text-xs">
+                  <div>
+                    <span className="text-text-sub">Tổng giá lẻ các món: </span>
+                    <span className="font-mono font-bold text-text-main">
+                      {formatVND(suggestedComboRetail)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-text-sub">Tổng giá vốn các món: </span>
+                    <span className="font-mono font-bold text-rose-600">
+                      {formatVND(suggestedComboCost)}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-teal-700 bg-teal-50 px-2.5 py-1 rounded border border-teal-200">
+                    💡 Giá bán combo và giá vốn đã được đồng bộ tự động lên phần định giá!
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Action Bottom Bar */}
+        <div className="flex items-center justify-between pt-4 border-t border-border-default">
+          <Link href="/products">
+            <Button variant="secondary" size="sm">
+              Hủy bỏ
+            </Button>
+          </Link>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSubmit}
+            isLoading={isSubmitting}
+            disabled={isSubmitting}
+          >
+            <Save className="w-3.5 h-3.5 mr-1.5" />
+            <span>Lưu sản phẩm</span>
+          </Button>
+        </div>
+      </form>
+
+      {/* =========================================================================
+          MODAL CON 1: TẠO NHANH DANH MỤC (ÁP DỤNG NGAY)
+      ========================================================================= */}
+      {isCategoryModalOpen && (
+        <Modal
+          isOpen={isCategoryModalOpen}
+          onClose={() => setIsCategoryModalOpen(false)}
+          title="Tạo Danh Mục Mới"
+        >
+          <form onSubmit={handleQuickCreateCategory} className="space-y-4 text-xs">
+            <div>
+              <label className="block text-[11px] font-semibold text-text-main mb-1">
+                Tên danh mục <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                autoFocus
+                placeholder="Ví dụ: Đồ Uống, Trà Sữa, Hải Sản Tươi, Quần Áo..."
+                value={newCatName}
+                onChange={(e) => setNewCatName(e.target.value)}
+                className="w-full px-3 py-2 bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand font-medium text-text-main"
+              />
+            </div>
+            <div className="pt-3 border-t border-border-default flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsCategoryModalOpen(false)}
+              >
+                Hủy
+              </Button>
+              <Button type="submit" variant="primary" size="sm">
+                <Save className="w-3.5 h-3.5 mr-1" />
+                <span>Lưu & Chọn ngay</span>
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* =========================================================================
+          MODAL CON 2: TẠO NHANH ĐƠN VỊ TÍNH (ÁP DỤNG NGAY)
+      ========================================================================= */}
+      {isUnitModalOpen && (
+        <Modal
+          isOpen={isUnitModalOpen}
+          onClose={() => setIsUnitModalOpen(false)}
+          title="Tạo Đơn Vị Tính Mới"
+        >
+          <form onSubmit={handleQuickCreateUnit} className="space-y-4 text-xs">
+            <div>
+              <label className="block text-[11px] font-semibold text-text-main mb-1">
+                Tên đơn vị tính <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                autoFocus
+                placeholder="Ví dụ: ly, cốc, phần, đĩa, đòn, set..."
+                value={newUnitName}
+                onChange={(e) => setNewUnitName(e.target.value)}
+                className="w-full px-3 py-2 bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand font-medium text-text-main"
+              />
+            </div>
+            <div className="pt-3 border-t border-border-default flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsUnitModalOpen(false)}
+              >
+                Hủy
+              </Button>
+              <Button type="submit" variant="primary" size="sm">
+                <Save className="w-3.5 h-3.5 mr-1" />
+                <span>Lưu & Chọn ngay</span>
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* =========================================================================
+          MODAL CON 3: TẠO NHANH TOPPING / NGUYÊN LIỆU (ÁP DỤNG NGAY)
+      ========================================================================= */}
+      {isToppingModalOpen && (
+        <Modal
+          isOpen={isToppingModalOpen}
+          onClose={() => setIsToppingModalOpen(false)}
+          title="Tạo Mới Nguyên Liệu / Topping F&B"
+        >
+          <form onSubmit={handleQuickCreateTopping} className="space-y-4 text-xs">
+            <div>
+              <label className="block text-[11px] font-semibold text-text-main mb-1">
+                Tên nguyên liệu / Topping <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                autoFocus
+                placeholder="Ví dụ: Trân châu hoàng kim, Kem phô mai, Trứng cút lộn..."
+                value={newToppingName}
+                onChange={(e) => setNewToppingName(e.target.value)}
+                className="w-full px-3 py-2 bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand font-medium text-text-main"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-text-main mb-1">
+                  Giá bán phụ thu (VND)
+                </label>
+                <input
+                  type="number"
+                  step="500"
+                  value={newToppingPrice}
+                  onChange={(e) => setNewToppingPrice(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-surface-app border border-border-default rounded-lg font-mono font-bold text-brand text-right focus:outline-none focus:border-brand"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-text-main mb-1">
+                  Giá vốn ước tính (VND)
+                </label>
+                <input
+                  type="number"
+                  step="500"
+                  value={newToppingCost}
+                  onChange={(e) => setNewToppingCost(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-surface-app border border-border-default rounded-lg font-mono text-text-main text-right focus:outline-none focus:border-brand"
+                />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-text-main mb-1.5">
-                Chế độ sản xuất (Production Mode)
+              <label className="block text-[11px] font-semibold text-text-main mb-1">
+                Đơn vị định lượng
               </label>
-              <select
-                value={productionMode}
-                onChange={(e) => setProductionMode(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main font-medium"
-              >
-                {PRODUCTION_MODES.map((pm) => (
-                  <option key={pm.value} value={pm.value}>
-                    {pm.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Mode Explanatory Notice */}
-            <div className="p-3.5 bg-indigo-50/60 rounded-lg border border-indigo-100 flex items-start gap-2.5">
-              <Info className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
-              <div className="text-xs text-indigo-950 space-y-1">
-                <div className="font-semibold">
-                  {PRODUCTION_MODES.find((m) => m.value === productionMode)?.label}
-                </div>
-                <div className="text-indigo-800 leading-relaxed">
-                  {PRODUCTION_MODES.find((m) => m.value === productionMode)?.desc}
-                </div>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* =========================================================================
-            KHỐI 5: ĐỒ ĂN KÈM / TOPPING (CHỈ HIỆN KHI product_modifiers = true)
-        ========================================================================= */}
-        {isModuleEnabled("product_modifiers") && (
-          <section className="bg-surface-card rounded-xl p-6 border border-orange-200 shadow-card space-y-4">
-            <div className="flex items-center justify-between border-b border-border-subtle pb-3">
-              <div className="flex items-center gap-2">
-                <UtensilsCrossed className="w-5 h-5 text-orange-600" />
-                <div>
-                  <h2 className="text-base font-semibold text-text-main flex items-center gap-2">
-                    5. Đồ ăn kèm / Topping
-                    <Badge variant="modifier">Mô-đun F&B Topping</Badge>
-                  </h2>
-                  <p className="text-xs text-text-sub mt-0.5">
-                    Cho phép gắn nhóm tùy chọn topping (Trân châu, Thạch, Trứng ốp la...) khi order tại quầy POS.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-orange-50/50 rounded-lg border border-orange-100 flex items-center gap-3">
               <input
-                type="checkbox"
-                id="allow_modifiers_cb"
-                checked={allowModifiers}
-                onChange={(e) => setAllowModifiers(e.target.checked)}
-                className="w-4 h-4 text-orange-600 rounded border-slate-300 focus:ring-orange-500"
+                type="text"
+                value={newToppingUom}
+                onChange={(e) => setNewToppingUom(e.target.value)}
+                placeholder="phần, muỗng, g, ml..."
+                className="w-full px-3 py-2 bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand font-mono text-text-main"
               />
-              <label htmlFor="allow_modifiers_cb" className="text-sm font-medium text-text-main cursor-pointer">
-                Cho phép chọn món ăn kèm / Topping khi bán tại POS
-              </label>
             </div>
 
-            {allowModifiers && (
-              <div>
-                <label className="block text-xs font-semibold text-text-main mb-1">
-                  Ghi chú nhóm Topping gợi ý
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ví dụ: Trân châu đường đen, Kem cheese, Thạch củ năng, Trứng ốp la thêm..."
-                  value={modifierNotes}
-                  onChange={(e) => setModifierNotes(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm bg-surface-muted/50 border border-border-subtle rounded-lg focus:outline-none focus:border-brand text-text-main"
-                />
-              </div>
-            )}
-          </section>
-        )}
+            <div className="p-2.5 bg-amber-50 rounded-lg border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+              Món này sẽ tự động lưu vào CSDL dưới dạng <strong>Nguyên vật liệu (RAW_MATERIAL)</strong> và thêm vào danh sách Topping kèm định lượng trừ kho.
+            </div>
 
-        {/* Action Button Bar */}
-        <div className="flex items-center justify-end gap-3 pt-4 border-t border-border-subtle">
-          <Link
-            href="/products"
-            className="px-5 py-2.5 rounded-lg border border-border-subtle bg-surface-card hover:bg-surface-muted text-text-sub hover:text-text-main text-sm font-medium transition"
-          >
-            Hủy bỏ
-          </Link>
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-hover shadow-sm transition disabled:opacity-50"
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Đang xử lý...</span>
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" />
-                <span>Tạo sản phẩm</span>
-              </>
-            )}
-          </button>
-        </div>
-      </form>
+            <div className="pt-3 border-t border-border-default flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsToppingModalOpen(false)}
+              >
+                Hủy
+              </Button>
+              <Button type="submit" variant="primary" size="sm">
+                <Save className="w-3.5 h-3.5 mr-1" />
+                <span>Lưu & Thêm vào Topping</span>
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }

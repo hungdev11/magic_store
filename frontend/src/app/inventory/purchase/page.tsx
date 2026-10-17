@@ -12,6 +12,7 @@ import {
   PurchaseInput,
   PurchaseItem,
   InventoryReceipt,
+  Warehouse,
 } from "@/lib/api";
 import { formatVND, formatQty } from "@/lib/design-tokens";
 import {
@@ -84,11 +85,13 @@ export default function PurchaseOrderPage() {
   // Master Data
   const [partners, setPartners] = useState<Partner[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Form Header State
   const [supplierId, setSupplierId] = useState<string>("");
+  const [warehouseId, setWarehouseId] = useState<string>("");
   const [purchaseDate, setPurchaseDate] = useState<string>(() => {
     return new Date().toISOString().split("T")[0];
   });
@@ -126,12 +129,18 @@ export default function PurchaseOrderPage() {
     setIsLoadingData(true);
     setFetchError(null);
     try {
-      const [partnersData, productsData] = await Promise.all([
+      const [partnersData, productsData, whsData] = await Promise.all([
         api.getPartners("SUPPLIER"),
         api.getProducts(),
+        api.getWarehouses(true),
       ]);
       setPartners(partnersData || []);
       setProducts(productsData || []);
+      setWarehouses(whsData || []);
+      if (whsData && whsData.length > 0) {
+        const def = whsData.find((w) => w.is_default);
+        setWarehouseId(def ? def.id : whsData[0].id);
+      }
     } catch (err: any) {
       setFetchError(err.message || "Không thể tải dữ liệu ban đầu");
     } finally {
@@ -174,6 +183,7 @@ export default function PurchaseOrderPage() {
       productName: string;
       baseUom: string;
       trackBatches: boolean;
+      shelfLifeDays?: number | null;
       variant: ProductVariant;
     }[] = [];
 
@@ -184,7 +194,8 @@ export default function PurchaseOrderPage() {
             productId: product.id,
             productName: product.name,
             baseUom: product.base_uom,
-            trackBatches: product.track_batches,
+            trackBatches: product.track_batches || (product.shelf_life_days != null && product.shelf_life_days > 0),
+            shelfLifeDays: product.shelf_life_days,
             variant: v,
           });
         });
@@ -225,7 +236,7 @@ export default function PurchaseOrderPage() {
     const itemMeta = flatVariants.find((fv) => fv.variant.id === targetVariantId);
     if (!itemMeta) return;
 
-    const { productId, productName, baseUom, trackBatches, variant } = itemMeta;
+    const { productId, productName, baseUom, trackBatches, shelfLifeDays, variant } = itemMeta;
 
     const currentStock = Number(variant.current_stock || 0);
     const costPrice = Number(variant.cost_price || 0);
@@ -245,8 +256,15 @@ export default function PurchaseOrderPage() {
     const todayStr = new Date().toISOString().slice(2, 10).replace(/-/g, "");
     const rowCount = items.length + 1;
     const defaultBatch = isBatchActive
-      ? `LOT-${todayStr}-${String(rowCount).padStart(2, "0")}`
+      ? `LOT-${todayStr}-${variant.sku}`
       : "";
+
+    let defaultExpiry = "";
+    if (shelfLifeDays && shelfLifeDays > 0) {
+      const pDate = new Date(purchaseDate || new Date().toISOString().split("T")[0]);
+      pDate.setDate(pDate.getDate() + shelfLifeDays);
+      defaultExpiry = pDate.toISOString().split("T")[0];
+    }
 
     const newRow: PurchaseItemRow = {
       rowId: `row-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -263,7 +281,7 @@ export default function PurchaseOrderPage() {
       qty: 1,
       unitCost: costPrice > 0 ? costPrice : 0,
       batchCode: defaultBatch,
-      expiryDate: "",
+      expiryDate: defaultExpiry,
       trackBatches: isBatchActive,
       availableUoms,
     };
@@ -422,6 +440,7 @@ export default function PurchaseOrderPage() {
 
       const purchasePayload: PurchaseInput = {
         supplier_id: supplierId || undefined,
+        warehouse_id: warehouseId || undefined,
         reference_id: referenceCode.trim() || undefined,
         notes: noteParts.join(" | "),
         items: items.map((item) => {
@@ -862,6 +881,29 @@ export default function PurchaseOrderPage() {
                   <option value="CASH">Tiền mặt (CASH)</option>
                   <option value="BANK_TRANSFER">Chuyển khoản (BANK)</option>
                   <option value="CREDIT">Ghi nợ NCC (Công nợ)</option>
+                </select>
+              </div>
+
+              {/* Kho Nhập Hàng */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-text-main flex items-center gap-1">
+                  <Building2 className="w-3.5 h-3.5 text-brand" />
+                  Kho nhập hàng
+                  <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={warehouseId}
+                  onChange={(e) => setWarehouseId(e.target.value)}
+                  className="w-full text-xs px-3 py-2 bg-surface-app border border-border-default rounded-lg focus:outline-none focus:border-brand text-text-main font-medium"
+                >
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} {w.is_default ? "(Mặc định)" : ""}
+                    </option>
+                  ))}
+                  {warehouses.length === 0 && (
+                    <option value="">(Kho mặc định hệ thống)</option>
+                  )}
                 </select>
               </div>
 

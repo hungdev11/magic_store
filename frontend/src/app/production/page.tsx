@@ -99,6 +99,7 @@ export default function ProductionPage() {
   const [assemblyExpiryDate, setAssemblyExpiryDate] = useState<string>("");
   const [assemblyNotes, setAssemblyNotes] = useState<string>("");
   const [isExecutingAssembly, setIsExecutingAssembly] = useState<boolean>(false);
+  const [isSyncingCost, setIsSyncingCost] = useState<boolean>(false);
 
   // Disassembly State
   const [selectedDisassemblyRecipeId, setSelectedDisassemblyRecipeId] = useState<string>("");
@@ -415,6 +416,28 @@ export default function ProductionPage() {
       });
     } finally {
       setIsExecutingAssembly(false);
+    }
+  };
+
+  const handleSyncRecipeCost = async () => {
+    if (!selectedAssemblyRecipe) return;
+    setIsSyncingCost(true);
+    try {
+      const res = await api.syncBomRecipeCost(selectedAssemblyRecipe.id);
+      setToast({
+        type: "success",
+        title: "Đồng bộ giá vốn thành công!",
+        message: `Đã cập nhật giá vốn của ${assemblyTargetVariant?.productName} thành ${formatVND(res.estimated_unit_cost)} dựa trên định mức BOM.`,
+      });
+      await loadData(true);
+    } catch (err: any) {
+      setToast({
+        type: "error",
+        title: "Đồng bộ thất bại",
+        message: err.message || "Lỗi khi đồng bộ giá vốn BOM",
+      });
+    } finally {
+      setIsSyncingCost(false);
     }
   };
 
@@ -879,7 +902,7 @@ export default function ProductionPage() {
                           SKU: {assemblyTargetVariant.sku}
                         </span>
                       </div>
-                      <div className="text-xs text-indigo-800/80 mt-0.5 flex items-center gap-3">
+                      <div className="text-xs text-indigo-800/80 mt-1 flex flex-wrap items-center gap-2 sm:gap-3">
                         <span>Đơn vị tính chuẩn: <strong>{assemblyTargetVariant.baseUom}</strong></span>
                         <span>•</span>
                         <span>
@@ -890,8 +913,25 @@ export default function ProductionPage() {
                         </span>
                         <span>•</span>
                         <span>
-                          Giá vốn WAC hiện hành:{" "}
-                          <strong className="text-indigo-900">{formatVND(assemblyTargetVariant.costPrice)}</strong>
+                          Giá vốn hiện hành:{" "}
+                          <strong className="text-indigo-900 font-mono tabular-nums">{formatVND(assemblyTargetVariant.costPrice)}</strong>
+                        </span>
+                        <span>•</span>
+                        <span className="inline-flex items-center gap-1.5 bg-white/90 border border-indigo-200 px-2 py-0.5 rounded text-indigo-900">
+                          <span>Định mức BOM:</span>
+                          <strong className="text-indigo-950 font-mono tabular-nums">
+                            {formatVND(selectedAssemblyRecipe?.estimated_unit_cost || (assemblyTotalMaterialCost / (assemblyStdOutputQty || 1)))}
+                          </strong>
+                          <button
+                            type="button"
+                            onClick={handleSyncRecipeCost}
+                            disabled={isSyncingCost}
+                            className="ml-1 text-[11px] font-semibold text-indigo-700 hover:text-indigo-950 underline inline-flex items-center gap-1"
+                            title="Đồng bộ giá vốn định mức BOM vào giá vốn của sản phẩm"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${isSyncingCost ? "animate-spin" : ""}`} />
+                            <span>Đồng bộ</span>
+                          </button>
                         </span>
                       </div>
                     </div>

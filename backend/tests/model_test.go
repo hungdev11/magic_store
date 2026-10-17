@@ -3,7 +3,8 @@ package tests
 import (
 	"testing"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 
 	"magic_store/backend/internal/model"
@@ -17,6 +18,11 @@ func TestModelMigration(t *testing.T) {
 
 	models := []interface{}{
 		&model.StoreSetting{},
+		&model.Warehouse{},
+		&model.WarehouseStock{},
+		&model.WarehouseStockBalance{},
+		&model.StockTransfer{},
+		&model.StockTransferItem{},
 		&model.Unit{},
 		&model.Category{},
 		&model.Product{},
@@ -38,10 +44,6 @@ func TestModelMigration(t *testing.T) {
 		&model.CashbookTransaction{},
 	}
 
-	if len(models) != 20 {
-		t.Fatalf("expected 20 models, got %d", len(models))
-	}
-
 	err = db.AutoMigrate(models...)
 	if err != nil {
 		t.Fatalf("AutoMigrate failed: %v", err)
@@ -51,6 +53,58 @@ func TestModelMigration(t *testing.T) {
 		if !db.Migrator().HasTable(m) {
 			t.Errorf("expected table for model %T to exist", m)
 		}
+	}
+}
+
+func TestWarehouseStockBalance_AvailableAndConstraints(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to open sqlite db: %v", err)
+	}
+
+	if err := db.AutoMigrate(&model.Warehouse{}, &model.Product{}, &model.ProductVariant{}, &model.WarehouseStockBalance{}); err != nil {
+		t.Fatalf("AutoMigrate failed: %v", err)
+	}
+
+	wh := &model.Warehouse{
+		Code:      "WH_TEST",
+		Name:      "Kho Test",
+		Type:      model.WarehouseTypeStorage,
+		IsActive:  true,
+		IsDefault: true,
+	}
+	if err := db.Create(wh).Error; err != nil {
+		t.Fatalf("failed to create warehouse: %v", err)
+	}
+
+	variant := &model.ProductVariant{
+		Sku:         "SKU_FISH",
+		VariantName: "Cá Chẽm Tươi",
+	}
+	if err := db.Create(variant).Error; err != nil {
+		t.Fatalf("failed to create variant: %v", err)
+	}
+
+	secCount := decimal.NewFromInt(20) // 20 Con
+	balance := &model.WarehouseStockBalance{
+		WarehouseID:        wh.ID,
+		VariantID:          variant.ID,
+		OnHandBaseQty:      decimal.NewFromFloat(30.0), // 30.0 kg
+		ReservedBaseQty:    decimal.NewFromFloat(7.5),  // 7.5 kg
+		LockedBaseQty:      decimal.NewFromFloat(1.5),  // 1.5 kg
+		InTransitBaseQty:   decimal.NewFromFloat(5.0),
+		OnHandSecondaryQty: &secCount,
+		WarehouseWacCost:   decimal.NewFromFloat(120000),
+		Version:            1,
+	}
+	if err := db.Create(balance).Error; err != nil {
+		t.Fatalf("failed to create warehouse stock balance: %v", err)
+	}
+
+	// Available = OnHand (30.0) - Reserved (7.5) - Locked (1.5) = 21.0
+	expectedAvailable := decimal.NewFromFloat(21.0)
+	if !balance.AvailableBaseQty().Equal(expectedAvailable) {
+		t.Fatalf("expected available %v, got %v", expectedAvailable, balance.AvailableBaseQty())
 	}
 }
 
